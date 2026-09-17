@@ -42,6 +42,7 @@ that one stack on the hosts that run it, not the fleet. See
 | Host setup | Ansible over SSH | `ansible/` |
 | Containers | Docker Compose pushed over SSH | `services/`, `scripts/deploy.sh` |
 | DNS | OpenTofu (Cloudflare) | `tofu/cloudflare/` |
+| Logs | Vector → VictoriaLogs, one store per site | `services/vector.yml` |
 | Secrets | Bitwarden Secrets Manager | `scripts/secrets.sh` |
 
 Why these and not the alternatives: [docs/alternatives.md](docs/alternatives.md).
@@ -154,5 +155,6 @@ cd ansible && ansible-playbook site.yml --limit web01 --check --diff
 - [docs/adding-a-host.md](docs/adding-a-host.md)
 - [docs/adding-a-service.md](docs/adding-a-service.md)
 - [docs/provisioning.md](docs/provisioning.md) — Hetzner, Proxmox templates, adopting a baremetal box
+- [docs/logging.md](docs/logging.md) — where container logs go, and why not via Docker's log driver
 - [docs/secrets.md](docs/secrets.md)
 - [docs/cloudflare.md](docs/cloudflare.md)

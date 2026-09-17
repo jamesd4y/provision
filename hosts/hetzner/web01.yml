@@ -63,6 +63,11 @@ dns:
       comment: only Let's Encrypt may issue for this zone
 
 services:
+  # Listed first so it is deployed first and captures the other stacks starting.
+  - name: vector
+    env:
+      VICTORIALOGS_ENDPOINT: http://10.10.0.20:9428
+
   - name: traefik
     secrets:
       CF_DNS_API_TOKEN: cloudflare/acme_dns_token

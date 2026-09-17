@@ -33,6 +33,10 @@ network:
       port: "22"
       source:
         - 10.20.0.0/24
+    - name: victorialogs
+      port: "9428"
+      source:
+        - 10.20.0.0/24
 
 ansible:
   user: deploy
@@ -46,6 +50,17 @@ dns:
   record: null   # private box, no public record
 
 services:
+  - name: vector
+    env:
+      VICTORIALOGS_ENDPOINT: http://10.20.0.10:9428
+
+  - name: victoria-logs
+    env:
+      VICTORIALOGS_BIND: 10.20.0.10
+      VICTORIALOGS_RETENTION: 180d
+      VICTORIALOGS_MAX_DISK_BYTES: "536870912000"   # 500 GiB of the tank
+    volumes_root: /srv/tank/victoria-logs
+
   - name: postgres
     secrets:
       POSTGRES_PASSWORD: postgres/nas_password

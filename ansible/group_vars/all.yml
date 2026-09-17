@@ -27,9 +27,14 @@ hardware_memory_tolerance_pct: 12   # firmware and the hypervisor both take a cu
 # Docker
 docker_edge_network: edge
 docker_stacks_root: /opt/stacks
+docker_prune_schedule: weekly
+
+# Keep logs local and let services/vector.yml ship them. Setting a remote
+# driver here (or per host) is supported but has real costs — docs/logging.md.
+docker_log_driver: json-file
 docker_log_max_size: 20m
 docker_log_max_file: "5"
-docker_prune_schedule: weekly
+docker_log_opts: {}
 
 # Storage
 storage_allow_autodetect: true

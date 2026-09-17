@@ -18,8 +18,9 @@ def test_stacks_render_in_dependency_order(repo, tmp_path):
     host = repo.hosts["web01"]
     wanted = [b["name"] for b in host.service_bindings]
     order = render_stack.order_services(repo, host, wanted)
-    # gitea and uptime-kuma both require traefik, so it has to come first.
-    assert order[0] == "traefik"
+    # gitea and uptime-kuma both require traefik, so traefik precedes both.
+    assert order.index("traefik") < order.index("gitea")
+    assert order.index("traefik") < order.index("uptime-kuma")
     assert set(order) == set(wanted)
 
 
@@ -107,7 +108,9 @@ def test_changing_one_service_only_redeploys_the_hosts_running_it(repo):
 
 def test_changing_a_host_file_redeploys_all_of_its_stacks(repo):
     result = change_analysis.analyse(repo, ["hosts/hetzner/web01.yml"])
-    assert {d["service"] for d in result["deployments"]} == {"traefik", "gitea", "uptime-kuma"}
+    assert {d["service"] for d in result["deployments"]} == {
+        "vector", "traefik", "gitea", "uptime-kuma",
+    }
     assert result["tofu_stacks"] == ["cloudflare", "hetzner"]
 
 

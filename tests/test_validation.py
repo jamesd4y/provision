@@ -29,6 +29,11 @@ def edit(path: Path, mutate) -> None:
     path.write_text(yaml.safe_dump(data, sort_keys=False))
 
 
+def binding(data: dict, name: str) -> dict:
+    """Look a service binding up by name — positions shift as hosts gain stacks."""
+    return next(b for b in data["services"] if b["name"] == name)
+
+
 def test_the_example_fleet_is_valid():
     report = run()
     assert report.errors == []
@@ -42,18 +47,18 @@ def test_unknown_service_is_rejected(fleet):
 
 def test_domain_outside_a_managed_zone_is_rejected(fleet):
     edit(fleet / "hosts/hetzner/web01.yml",
-         lambda d: d["services"][1].update({"domains": ["git.someoneelse.net"]}))
+         lambda d: binding(d, "gitea").update({"domains": ["git.someoneelse.net"]}))
     assert any("not in cloudflare/zones.yml" in e for e in run(fleet).errors)
 
 
 def test_two_hosts_cannot_claim_the_same_domain(fleet):
     edit(fleet / "hosts/pve01/media01.yml",
-         lambda d: d["services"][1].update({"domains": ["status.example.com"]}))
+         lambda d: binding(d, "uptime-kuma").update({"domains": ["status.example.com"]}))
     assert any("claimed by both" in e for e in run(fleet).errors)
 
 
 def test_missing_required_env_is_rejected(fleet):
-    edit(fleet / "hosts/hetzner/web01.yml", lambda d: d["services"][0].pop("secrets"))
+    edit(fleet / "hosts/hetzner/web01.yml", lambda d: binding(d, "traefik").pop("secrets"))
     assert any("requires env 'CF_DNS_API_TOKEN'" in e for e in run(fleet).errors)
 
 
@@ -82,7 +87,7 @@ def test_service_bound_twice_is_rejected(fleet):
 
 def test_routing_a_domain_to_an_internal_service_is_rejected(fleet):
     edit(fleet / "hosts/hetzner/db01.yml",
-         lambda d: d["services"][0].update({"domains": ["db.example.com"]}))
+         lambda d: binding(d, "postgres").update({"domains": ["db.example.com"]}))
     assert any("ingress: none" in e for e in run(fleet).errors)
 
 

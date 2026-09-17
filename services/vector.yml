@@ -1,0 +1,106 @@
+# The log collector. Runs on every host, reads container logs from the Docker
+# API, enriches them with host/stack/service, and ships them to VictoriaLogs.
+#
+# Why a collector rather than pointing Docker's own log-driver at VictoriaLogs:
+#
+#   - Docker's remote log drivers have no durable buffer. In the default
+#     blocking mode a slow or unreachable log server applies backpressure to
+#     container stdout, so your application stalls because your log server is
+#     down. In non-blocking mode you get a small in-memory ring buffer that
+#     silently drops. Vector buffers to disk and retries.
+#   - Docker's dual logging writes to the local cache anyway so `docker logs`
+#     keeps working, so a remote driver does not save you the local write.
+#   - VictoriaLogs speaks no driver protocol except syslog, which flattens
+#     structured logs into an opaque RFC5424 line.
+#
+# docs/logging.md has the full comparison, and how to use the syslog driver
+# instead on a host too small to justify this container.
+x-provision:
+  description: Vector — reads container logs and ships them to VictoriaLogs.
+  ingress: none
+  singleton: false
+  required_env:
+    - VICTORIALOGS_ENDPOINT
+  optional_env:
+    # Vector requires a disk buffer of at least 268435488 bytes.
+    VECTOR_BUFFER_BYTES: "536870912"
+    VECTOR_LOG_LEVEL: warn
+    # Comma-separated container names to drop before they are shipped.
+    VECTOR_EXCLUDE_CONTAINERS: vector
+  data_dirs:
+    - data
+
+services:
+  vector:
+    image: timberio/vector:0.58.0-debian
+    container_name: vector
+    restart: unless-stopped
+    environment:
+      VECTOR_LOG: ${VECTOR_LOG_LEVEL}
+      TZ: ${TZ}
+    volumes:
+      # Read-only: Vector needs to list and follow containers, nothing more.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${DATA_ROOT}/data:/vector-data
+    configs:
+      # Compose mounts configs 0444 by default, which is what we want.
+      - source: vector_config
+        target: /etc/vector/vector.yaml
+    # No healthcheck: the image ships no HTTP client to probe with, and a fake
+    # one is worse than none. The real liveness signal is VictoriaLogs itself:
+    # if a host stops appearing in `host:` queries, its collector is down.
+    command:
+      - --config
+      - /etc/vector/vector.yaml
+
+configs:
+  vector_config:
+    # Inlined so a service stays one file. Compose interpolates ${...} here
+    # from the .env this repo renders, before Vector ever sees it.
+    content: |
+      data_dir: /vector-data
+
+      api:
+        enabled: false
+
+      sources:
+        containers:
+          type: docker_logs
+          exclude_containers: [${VECTOR_EXCLUDE_CONTAINERS}]
+
+      transforms:
+        container_logs:
+          type: remap
+          inputs: [containers]
+          source: |
+            .host = "${HOSTNAME}"
+            .origin = "container"
+            .stack = string(.label."com.docker.compose.project") ?? "unmanaged"
+            .service = string(.label."com.docker.compose.service") ?? string(.container_name) ?? "unknown"
+            del(.label)
+            del(.container_created_at)
+
+      sinks:
+        victorialogs:
+          type: elasticsearch
+          inputs: [container_logs]
+          endpoints:
+            - "${VICTORIALOGS_ENDPOINT}/insert/elasticsearch/"
+          mode: bulk
+          api_version: v8
+          compression: gzip
+          healthcheck:
+            enabled: false
+          query:
+            _msg_field: message
+            _time_field: timestamp
+            # Stream fields must stay low cardinality. Never put container_id
+            # or a request id here — one stream per container restart would
+            # wreck ingestion performance.
+            _stream_fields: host,stack,service
+          buffer:
+            type: disk
+            max_size: ${VECTOR_BUFFER_BYTES}
+            when_full: block
+          request:
+            retry_attempts: 20

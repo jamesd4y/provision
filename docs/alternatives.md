@@ -130,7 +130,31 @@ already has the token scoping for it.
 
 ---
 
-## 6. Which CI
+## 6. How logs get off a host
+
+**Chosen: Vector on every host, reading the Docker API, shipping to VictoriaLogs.**
+
+Docker keeps writing `json-file` locally. `docs/logging.md` has the full
+reasoning; the short version is that Docker's remote log drivers have no durable
+buffer, block container stdout by default when the log server is unwell, and —
+because dual logging keeps the local cache anyway — do not even save you the
+local write.
+
+| Option | Why you'd want it | Why not here |
+|---|---|---|
+| **Vector** *(chosen)* | Disk buffer with retry, VRL for parsing and redaction, reads container labels so stack/service enrich themselves, one agent that can later take journald and file logs | ~50–80 MiB per host, and VRL is another small language to learn |
+| Docker `syslog` log-driver, direct | No extra container at all | Blocking by default; non-blocking drops silently; flattens structured logs into RFC5424. Supported here as `docker_log_driver` for hosts too small to justify a collector |
+| Fluent Bit | Much smaller footprint (~5 MiB), fine `http` output to the jsonline endpoint | Weaker transform language; worth switching to if a host is genuinely memory-constrained |
+| OpenTelemetry Collector | Vendor-neutral, one agent for logs, metrics and traces | Heavier, and the filelog receiver config is considerably more verbose for the same result |
+| Promtail / Grafana Alloy | VictoriaLogs accepts the Loki push protocol | Promtail is superseded; no reason to start there now |
+| `vlagent` | VictoriaLogs' own forwarder — good for buffering toward a central store | It forwards, it does not collect from Docker; it complements a collector rather than replacing one |
+
+**Switch if:** a host cannot spare the memory (Fluent Bit), or you start
+collecting traces too and want one agent for everything (OpenTelemetry).
+
+---
+
+## 7. Which CI
 
 **Given: Woodpecker.**
 

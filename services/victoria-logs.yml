@@ -1,0 +1,62 @@
+# The log store. One per site: hosts ship to the VictoriaLogs nearest them,
+# because a log pipeline that crosses a WAN link is a log pipeline that loses
+# logs whenever the link does.
+#
+# VictoriaLogs has NO AUTHENTICATION. Anyone who can reach this port can read
+# every log line and delete data through the HTTP API. VICTORIALOGS_BIND
+# defaults to 127.0.0.1 for that reason — a host that wants to receive from
+# other hosts must widen it deliberately, and pair that with a firewall rule
+# scoped to the private network. To publish the UI, put it behind Traefik and
+# an authenticating layer (Cloudflare Access, basic auth middleware); do not
+# simply bind it to 0.0.0.0.
+x-provision:
+  description: VictoriaLogs — the log store Vector agents ship to.
+  ingress: none
+  singleton: false
+  optional_env:
+    VICTORIALOGS_BIND: 127.0.0.1
+    VICTORIALOGS_PORT: "9428"
+    VICTORIALOGS_RETENTION: 30d
+    VICTORIALOGS_FUTURE_RETENTION: 2d
+    VICTORIALOGS_MAX_DISK_BYTES: "0"     # 0 = no cap; retention alone decides
+    VICTORIALOGS_MEMORY_PERCENT: "40"
+    # Syslog ingestion, for hosts using Docker's syslog log-driver instead of a
+    # Vector collector. Empty disables the listener entirely (verified: the
+    # binary simply does not open it). See docs/logging.md.
+    VICTORIALOGS_SYSLOG_TCP: ""
+    VICTORIALOGS_SYSLOG_BIND: 127.0.0.1
+    VICTORIALOGS_SYSLOG_PORT: "514"
+  data_dirs:
+    - data
+
+services:
+  victoria-logs:
+    image: victoriametrics/victoria-logs:v1.24.0-victorialogs
+    container_name: victoria-logs
+    restart: unless-stopped
+    command:
+      - -storageDataPath=/victoria-logs-data
+      - -httpListenAddr=:9428
+      - -retentionPeriod=${VICTORIALOGS_RETENTION}
+      - -futureRetention=${VICTORIALOGS_FUTURE_RETENTION}
+      - -retention.maxDiskSpaceUsageBytes=${VICTORIALOGS_MAX_DISK_BYTES}
+      - -memory.allowedPercent=${VICTORIALOGS_MEMORY_PERCENT}
+      - -syslog.listenAddr.tcp=${VICTORIALOGS_SYSLOG_TCP}
+      - -loggerTimezone=${TZ}
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - ${DATA_ROOT}/data:/victoria-logs-data
+    ports:
+      # host:container — the bind address is what keeps this private.
+      - "${VICTORIALOGS_BIND}:${VICTORIALOGS_PORT}:9428"
+      # Published on loopback unless a host widens the bind; with
+      # VICTORIALOGS_SYSLOG_TCP empty nothing is listening behind it.
+      - "${VICTORIALOGS_SYSLOG_BIND}:${VICTORIALOGS_SYSLOG_PORT}:514"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:9428/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

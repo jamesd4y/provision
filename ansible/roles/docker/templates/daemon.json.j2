@@ -1,9 +1,19 @@
+{#
+  Managed by github.com/jamesd4y/provision — local edits are overwritten.
+
+  Rotation options only apply to the file-based drivers. For a remote driver
+  (syslog, fluentd, gelf, ...) Docker's dual logging still writes a local cache
+  via the `local` driver so `docker logs` keeps working, so switching driver
+  does not save you the local write — it only changes where the second copy
+  goes. docs/logging.md explains why this repo ships logs with a collector
+  instead.
+#}
+{% set _rotation = {"max-size": docker_log_max_size, "max-file": docker_log_max_file}
+   if docker_log_driver in ["json-file", "local"] else {} %}
+{% set _log_opts = _rotation | combine(docker_log_opts) %}
 {
-  "log-driver": "json-file",
-  "log-opts": {
-    "max-size": "{{ docker_log_max_size }}",
-    "max-file": "{{ docker_log_max_file }}"
-  },
+  "log-driver": {{ docker_log_driver | to_json }},
+  "log-opts": {{ _log_opts | to_json }},
   "live-restore": true,
   "userland-proxy": false,
   "default-address-pools": [

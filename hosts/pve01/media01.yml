@@ -50,6 +50,10 @@ dns:
   record: media01
 
 services:
+  - name: vector
+    env:
+      VICTORIALOGS_ENDPOINT: http://10.20.0.10:9428
+
   - name: traefik
     secrets:
       CF_DNS_API_TOKEN: cloudflare/acme_dns_token

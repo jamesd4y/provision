@@ -37,6 +37,10 @@ network:
       port: "5432"
       source:
         - 10.10.0.0/16
+    - name: victorialogs
+      port: "9428"
+      source:
+        - 10.10.0.0/16
 
 ansible:
   roles:
@@ -52,6 +56,18 @@ dns:
   record: db01
 
 services:
+  - name: vector
+    env:
+      VICTORIALOGS_ENDPOINT: http://10.10.0.20:9428
+
+  - name: victoria-logs
+    env:
+      # Reachable from the Hetzner private network only; the firewall rule
+      # above is what keeps it there.
+      VICTORIALOGS_BIND: 10.10.0.20
+      VICTORIALOGS_RETENTION: 90d
+      VICTORIALOGS_MAX_DISK_BYTES: "107374182400"   # 100 GiB of the pgdata volume
+
   - name: postgres
     secrets:
       POSTGRES_PASSWORD: postgres/superuser_password
