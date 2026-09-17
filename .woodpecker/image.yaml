@@ -1,0 +1,25 @@
+# Rebuild the toolbox image. Everything else in .woodpecker/ runs inside it, so
+# this is the only pipeline that may not use it.
+when:
+  - event: push
+    branch: ${CI_REPO_DEFAULT_BRANCH}
+    path:
+      include: [ci/**, ansible/requirements.yml]
+  - event: manual
+
+steps:
+  - name: build-and-push
+    image: woodpeckerci/plugin-docker-buildx:5
+    settings:
+      registry: ghcr.io
+      repo: ghcr.io/jamesd4y/provision-ci
+      dockerfile: ci/Dockerfile
+      context: .
+      platforms: linux/amd64
+      tags:
+        - latest
+        - ${CI_COMMIT_SHA:0:12}
+      username:
+        from_secret: ghcr_username
+      password:
+        from_secret: ghcr_token

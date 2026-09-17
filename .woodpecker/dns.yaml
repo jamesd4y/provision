@@ -1,0 +1,31 @@
+# Cloudflare DNS. Runs after machines exist, because a record cannot point at an
+# address that has not been assigned yet.
+when:
+  - event: push
+    branch: ${CI_REPO_DEFAULT_BRANCH}
+  - event: manual
+
+depends_on:
+  - provision
+
+variables:
+  - &toolbox ghcr.io/jamesd4y/provision-ci:latest
+  - &bws_env
+    BWS_ACCESS_TOKEN:
+      from_secret: bws_access_token
+    BWS_PROJECT_ID:
+      from_secret: bws_project_id
+
+steps:
+  - name: apply
+    image: *toolbox
+    environment: *bws_env
+    commands:
+      - scripts/refresh_host_ips.sh
+      - python3 scripts/render_tfvars.py --stack cloudflare
+      - |
+        # Every managed record is derived from hosts/ and services/, so this is
+        # always a full apply: a domain removed from a host file is a record
+        # removed from the zone.
+        scripts/tofu.sh cloudflare default apply -auto-approve -lock-timeout=10m
+      - scripts/tofu.sh cloudflare default output -json records | jq .

@@ -1,0 +1,7 @@
+---
+firewall_enabled: true
+# Rules that exist on every host regardless of what the host file declares.
+firewall_baseline:
+  - { name: ssh, port: "22", protocol: tcp, source: ["0.0.0.0/0", "::/0"] }
+firewall_allow_icmp: true
+firewall_log_drops: false

@@ -1,0 +1,67 @@
+# Ship Docker Compose stacks. Only the (host, stack) pairs the change actually
+# touched are redeployed — editing one service does not restart the fleet.
+when:
+  - event: push
+    branch: ${CI_REPO_DEFAULT_BRANCH}
+  - event: [manual, cron]
+
+depends_on:
+  - configure
+
+variables:
+  - &toolbox ghcr.io/jamesd4y/provision-ci:latest
+  - &bws_env
+    BWS_ACCESS_TOKEN:
+      from_secret: bws_access_token
+    BWS_PROJECT_ID:
+      from_secret: bws_project_id
+
+steps:
+  - name: scope
+    image: *toolbox
+    commands:
+      - mkdir -p build
+      - |
+        if [ "$CI_PIPELINE_EVENT" = "push" ]; then
+          git fetch --no-tags origin "$CI_PREV_COMMIT_SHA" 2>/dev/null || true
+          python3 scripts/changed.py --base "$CI_PREV_COMMIT_SHA" > build/changed.json
+        else
+          python3 scripts/changed.py --all > build/changed.json
+        fi
+      - jq -r '.deployments[] | "\(.host) \(.service)"' build/changed.json > build/deployments.txt
+      - cat build/deployments.txt
+
+  - name: secrets-preflight
+    image: *toolbox
+    environment: *bws_env
+    commands:
+      # Fail before touching a host if a secret a stack needs is missing. No
+      # values are printed — only which keys resolved.
+      - |
+        while read -r host service; do
+          [ -z "${host:-}" ] && continue
+          python3 scripts/render_stack.py --host "$host" --service "$service" --out build/deploy >/dev/null
+          map="build/deploy/$host/$service/secrets.map"
+          if [ -s "$map" ]; then
+            echo "== $host/$service"
+            scripts/secrets.sh check "$map"
+          fi
+        done < build/deployments.txt
+
+  - name: push-stacks
+    image: *toolbox
+    environment: *bws_env
+    commands:
+      - scripts/refresh_host_ips.sh
+      - eval "$(scripts/ssh_setup.sh)"
+      - |
+        # One deploy.sh call per host, carrying that host's stacks in dependency
+        # order, so Traefik is up before anything that routes through it.
+        cut -d' ' -f1 build/deployments.txt | sort -u > build/deploy_hosts.txt
+        while read -r host; do
+          [ -z "${host:-}" ] && continue
+          services="$(awk -v h="$host" '$1 == h { printf "%s ", $2 }' build/deployments.txt)"
+          echo "== deploying to $host: $services"
+          # shellcheck disable=SC2086
+          scripts/deploy.sh "$host" $services
+        done < build/deploy_hosts.txt

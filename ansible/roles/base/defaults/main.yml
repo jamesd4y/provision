@@ -1,0 +1,9 @@
+---
+base_packages: []
+unattended_upgrades: true
+swap_size_mb: 0
+manage_sshd: true
+sshd_allow_password_auth: false
+hardware_assert: true
+hardware_assert_fatal_kinds: [baremetal]
+hardware_memory_tolerance_pct: 12

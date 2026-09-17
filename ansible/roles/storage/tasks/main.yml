@@ -1,0 +1,17 @@
+---
+# Formatting a disk destroys data, so every path here refuses to act on anything
+# that already has a partition table or a filesystem. A disk with `format: none`
+# in hosts/ is skipped entirely — that is how you hand a pre-existing ZFS pool
+# or an encrypted volume to this role safely.
+- name: Manage each declared data disk
+  ansible.builtin.include_tasks: one_disk.yml
+  loop: >-
+    {{ provision_storage
+       | selectattr('mount', 'defined')
+       | rejectattr('mount', 'equalto', '/')
+       | list }}
+  loop_control:
+    loop_var: disk
+    label: "{{ disk.name }} -> {{ disk.mount }}"
+  when: (disk.format | default('ext4')) != 'none'
+  tags: [storage]

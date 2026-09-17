@@ -1,0 +1,40 @@
+---
+# Fleet-wide defaults. Anything here can be overridden per host under
+# ansible.vars in hosts/<provider>/<hostname>.yml.
+
+# Base
+base_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - jq
+  - rsync
+  - chrony
+  - python3
+  - unattended-upgrades
+unattended_upgrades: true
+swap_size_mb: 0            # 0 disables swap file management entirely
+manage_sshd: true
+sshd_allow_password_auth: false
+
+# Hardware assertions. Baremetal is described, not created, so a mismatch is a
+# real finding; a cloud host may legitimately have more than it asked for.
+hardware_assert: true
+hardware_assert_fatal_kinds:
+  - baremetal
+hardware_memory_tolerance_pct: 12   # firmware and the hypervisor both take a cut
+
+# Docker
+docker_edge_network: edge
+docker_stacks_root: /opt/stacks
+docker_log_max_size: 20m
+docker_log_max_file: "5"
+docker_prune_schedule: weekly
+
+# Storage
+storage_allow_autodetect: true
+
+# Monitoring
+node_exporter_image: quay.io/prometheus/node-exporter:v1.8.2
+node_exporter_port: 9100
+node_exporter_bind: "{{ ansible_host }}"

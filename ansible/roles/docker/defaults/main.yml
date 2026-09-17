@@ -1,0 +1,7 @@
+---
+docker_edge_network: edge
+docker_stacks_root: /opt/stacks
+docker_log_max_size: 20m
+docker_log_max_file: "5"
+docker_prune_schedule: weekly
+docker_daemon_extra: {}

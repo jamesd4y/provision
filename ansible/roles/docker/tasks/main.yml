@@ -1,0 +1,132 @@
+---
+- name: Ensure the apt keyring directory exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    mode: "0755"
+  tags: [docker]
+
+- name: Install the Docker apt keyring
+  ansible.builtin.get_url:
+    url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
+    dest: /etc/apt/keyrings/docker.asc
+    mode: "0644"
+    force: false
+  tags: [docker]
+
+- name: Add the Docker repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}
+      signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/{{ ansible_distribution | lower }}
+      {{ ansible_distribution_release }} stable
+    filename: docker
+    state: present
+  tags: [docker]
+
+- name: Install Docker Engine and the Compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+  register: docker_apt
+  retries: 3
+  delay: 10
+  until: docker_apt is succeeded
+  tags: [docker]
+
+- name: Configure the daemon
+  # Log rotation is the one setting whose absence eventually fills the disk and
+  # takes the host down, so it is not optional.
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+  notify: Restart docker
+  tags: [docker]
+
+- name: Start Docker
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+  tags: [docker]
+
+- name: Let the deploy user talk to the daemon
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: docker
+    append: true
+  notify: Reset ssh connection
+  tags: [docker]
+
+- name: Create the stacks root
+  ansible.builtin.file:
+    path: "{{ docker_stacks_root }}"
+    state: directory
+    owner: "{{ ansible_user }}"
+    group: "{{ ansible_user }}"
+    mode: "0750"
+  tags: [docker]
+
+- name: Create the shared edge network
+  # Every Traefik-fronted stack attaches to this. It is created once here rather
+  # than by whichever stack happens to deploy first.
+  community.docker.docker_network:
+    name: "{{ docker_edge_network }}"
+    driver: bridge
+    state: present
+  tags: [docker]
+
+- name: Create data roots for this host's stacks
+  ansible.builtin.file:
+    path: "{{ item.data_root }}"
+    state: directory
+    mode: "0750"
+  loop: "{{ provision_services }}"
+  loop_control:
+    label: "{{ item.name }} -> {{ item.data_root }}"
+  tags: [docker]
+
+- name: Prune unused images on a schedule
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/docker-prune.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Prune unused Docker data
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/bin/docker system prune -af --filter "until=168h"
+  notify: Reload systemd
+  tags: [docker]
+
+- name: Schedule the prune
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/docker-prune.timer
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Prune unused Docker data {{ docker_prune_schedule }}
+      [Timer]
+      OnCalendar={{ docker_prune_schedule }}
+      Persistent=true
+      RandomizedDelaySec=1h
+      [Install]
+      WantedBy=timers.target
+  notify: Reload systemd
+  tags: [docker]
+
+- name: Enable the prune timer
+  ansible.builtin.systemd:
+    name: docker-prune.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  tags: [docker]

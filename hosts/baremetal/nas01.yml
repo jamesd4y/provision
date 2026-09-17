@@ -1,0 +1,54 @@
+hostname: nas01
+fqdn: nas01.lan
+description: Storage box. Declared specs are verified against facts, never applied.
+enabled: true
+tags:
+  - baremetal
+  - storage
+
+hardware:
+  cpu: 8
+  memory: 32768
+  architecture: x86
+  storage:
+    - name: root
+      size: 250
+      type: ssd
+      mount: /
+    - name: tank
+      size: 16000
+      type: hdd
+      mount: /srv/tank
+      format: none   # pre-existing ZFS pool; the disk role leaves it alone
+
+os:
+  distribution: debian
+  version: "13"
+
+network:
+  ipv4: 10.20.0.10
+  private_ipv4: 10.20.0.10
+  firewall:
+    - name: ssh
+      port: "22"
+      source:
+        - 10.20.0.0/24
+
+ansible:
+  user: deploy
+  roles:
+    - base
+    - docker
+    - node_exporter
+
+dns:
+  zone: example.com
+  record: null   # private box, no public record
+
+services:
+  - name: postgres
+    secrets:
+      POSTGRES_PASSWORD: postgres/nas_password
+    env:
+      POSTGRES_DB: scratch
+      POSTGRES_USER: scratch

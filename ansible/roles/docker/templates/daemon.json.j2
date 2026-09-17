@@ -1,0 +1,14 @@
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "{{ docker_log_max_size }}",
+    "max-file": "{{ docker_log_max_file }}"
+  },
+  "live-restore": true,
+  "userland-proxy": false,
+  "default-address-pools": [
+    { "base": "172.20.0.0/16", "size": 24 }
+  ]{% if docker_daemon_extra %},
+  {{ docker_daemon_extra | to_nice_json | regex_replace('^{\n', '') | regex_replace('\n}$', '') }}
+{% endif %}
+}

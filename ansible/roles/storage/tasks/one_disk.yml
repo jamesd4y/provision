@@ -1,0 +1,73 @@
+---
+- name: Find the device backing {{ disk.name }}
+  ansible.builtin.set_fact:
+    storage_device: "{{ provision_diskstorage_devices[disk.name] | default('') }}"
+    storage_min_bytes: >-
+      {{ (disk.size | int) * 1024 * 1024 * 1024
+         * (100 - (storage_size_tolerance_pct | int)) // 100 }}
+
+- name: Autodetect an unused device of the right size for {{ disk.name }}
+  when:
+    - storage_device | length == 0
+    - storage_allow_autodetect | bool
+  block:
+    - name: List candidate devices for {{ disk.name }}
+      ansible.builtin.set_fact:
+        storage_candidates: >-
+          {{ ansiblestorage_devices
+             | dict2items
+             | selectattr('value.partitions', 'equalto', {})
+             | selectattr('key', 'match', '^(sd|vd|nvme)')
+             | map(attribute='key') | list }}
+
+    - name: Ask the kernel how big each candidate is for {{ disk.name }}
+      ansible.builtin.command: "lsblk -bdno SIZE,FSTYPE /dev/{{ item }}"
+      register: storage_sizes
+      changed_when: false
+      loop: "{{ storage_candidates }}"
+
+    - name: Pick the first empty device within tolerance for {{ disk.name }}
+      ansible.builtin.set_fact:
+        storage_device: "/dev/{{ item.item }}"
+      when:
+        - storage_device | length == 0
+        # a single column means lsblk found no FSTYPE, i.e. no filesystem
+        - (item.stdout.split() | length) == 1
+        - (item.stdout.split()[0] | int) >= storage_min_bytes
+      loop: "{{ storage_sizes.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+- name: Give up rather than guess a device for {{ disk.name }}
+  ansible.builtin.fail:
+    msg: >-
+      No device found for disk '{{ disk.name }}' ({{ disk.size }} GiB, mount {{ disk.mount }}).
+      Set provision_diskstorage_devices.{{ disk.name }} under ansible.vars in
+      hosts/{{ provision_provider }}/{{ inventory_hostname }}.yml.
+  when: storage_device | length == 0
+
+- name: Create the filesystem on {{ disk.name }}
+  community.general.filesystem:
+    fstype: "{{ disk.format | default('ext4') }}"
+    dev: "{{ storage_device }}"
+    # force is never set: an existing filesystem is left alone and mounted.
+
+- name: Mount by UUID, so a device rename cannot break boot, for {{ disk.name }}
+  ansible.posix.mount:
+    path: "{{ disk.mount }}"
+    src: >-
+      UUID={{ (ansible_facts.device_links.uuids[storage_device | basename]
+               | default([]) | first) | default(omit) }}
+    fstype: "{{ disk.format | default('ext4') }}"
+    opts: defaults,noatime,nofail
+    state: mounted
+  when: ansible_facts.device_links.uuids[storage_device | basename] is defined
+
+- name: Mount by device path when no UUID is known yet for {{ disk.name }}
+  ansible.posix.mount:
+    path: "{{ disk.mount }}"
+    src: "{{ storage_device }}"
+    fstype: "{{ disk.format | default('ext4') }}"
+    opts: defaults,noatime,nofail
+    state: mounted
+  when: ansible_facts.device_links.uuids[storage_device | basename] is not defined

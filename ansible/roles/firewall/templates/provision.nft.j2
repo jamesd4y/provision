@@ -1,0 +1,44 @@
+#!/usr/sbin/nft -f
+# Managed by github.com/jamesd4y/provision from
+# hosts/{{ provision_provider }}/{{ inventory_hostname }}.yml — local edits are overwritten.
+
+flush ruleset
+
+table inet filter {
+  chain input {
+    type filter hook input priority filter; policy drop;
+
+    ct state established,related accept
+    ct state invalid drop
+    iif lo accept
+{% if firewall_allow_icmp %}
+    ip protocol icmp accept
+    ip6 nexthdr ipv6-icmp accept
+{% endif %}
+
+{% for rule in (firewall_baseline + provision_firewall) %}
+    # {{ rule.name }}
+{%   for cidr in (rule.source | default(['0.0.0.0/0', '::/0'])) %}
+{%     if ':' in cidr %}
+    ip6 saddr {{ cidr }} {{ rule.protocol | default('tcp') }} dport {{ rule.port | replace('-', '-') }} accept
+{%     else %}
+    ip saddr {{ cidr }} {{ rule.protocol | default('tcp') }} dport {{ rule.port | replace('-', '-') }} accept
+{%     endif %}
+{%   endfor %}
+{% endfor %}
+
+{% if firewall_log_drops %}
+    limit rate 5/minute log prefix "nft-drop: "
+{% endif %}
+  }
+
+  chain forward {
+    # Docker owns forwarding. Accepting here and letting Docker's own chains
+    # decide is the only arrangement that does not silently break containers.
+    type filter hook forward priority filter; policy accept;
+  }
+
+  chain output {
+    type filter hook output priority filter; policy accept;
+  }
+}

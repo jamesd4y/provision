@@ -1,0 +1,83 @@
+# Gate. Nothing else runs until the repo describes a fleet that makes sense.
+# Fast and offline: no credentials, no network, no state.
+when:
+  - event: [push, pull_request, manual]
+
+variables:
+  - &toolbox ghcr.io/jamesd4y/provision-ci:latest
+
+steps:
+  - name: yaml-lint
+    image: *toolbox
+    commands:
+      - yamllint -s .
+
+  - name: model
+    image: *toolbox
+    commands:
+      # Schema + cross-references: every service a host names exists, every
+      # domain sits in a zone we manage, every required env var is supplied.
+      - python3 scripts/validate.py
+
+  - name: render
+    image: *toolbox
+    commands:
+      # If the model cannot be turned into tofu inputs and compose bundles, the
+      # later stages would fail anyway — find out here, in seconds.
+      - python3 scripts/host_ips.py --reset > /dev/null
+      - python3 scripts/render_tfvars.py --all
+      - |
+        for host in $(python3 -c "
+        import sys; sys.path.insert(0, 'scripts')
+        from lib import model
+        print(' '.join(h.name for h in model.load_repo().hosts.values() if h.enabled))
+        "); do
+          python3 scripts/render_stack.py --host "$host" --out build/deploy
+        done
+      - |
+        echo "--- rendered bundles ---"
+        find build/deploy -name stack.json -printf '%P\n' | sort
+
+  - name: tests
+    image: *toolbox
+    commands:
+      # The invariants the schema cannot express: blast radius, dependency
+      # order, and the rule that a rendered bundle never contains a secret.
+      - python3 -m pytest tests/ -q
+
+  - name: tofu-fmt
+    image: *toolbox
+    commands:
+      - tofu fmt -check -recursive tofu/
+
+  - name: tofu-validate
+    image: *toolbox
+    commands:
+      - |
+        for stack in hetzner proxmox cloudflare; do
+          echo "==> $stack"
+          tofu -chdir="tofu/$stack" init -backend=false -input=false >/dev/null
+          tofu -chdir="tofu/$stack" validate
+        done
+
+  - name: ansible-lint
+    image: *toolbox
+    commands:
+      - cd ansible
+      - ansible-playbook site.yml check.yml --syntax-check
+      - ansible-lint --offline --nocolor -c ../.ansible-lint site.yml check.yml roles/
+
+  - name: no-secrets-committed
+    image: *toolbox
+    commands:
+      # secrets.map and hosts/ hold KEYS. Anything that looks like a value is a
+      # mistake worth stopping the pipeline for.
+      - |
+        pattern='BEGIN [A-Z ]*PRIVATE KEY'
+        pattern="$pattern|bws_[A-Za-z0-9]{20,}"
+        pattern="$pattern|[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{6,}"
+        if git grep -nIE "$pattern" -- hosts services cloudflare ansible scripts; then
+          echo "looks like a credential was committed - see the matches above" >&2
+          exit 1
+        fi
+        echo "no credential-shaped strings in the declarative tree"

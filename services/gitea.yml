@@ -1,0 +1,57 @@
+# Git hosting. Uses the Postgres on db01 rather than a sidecar database, so the
+# stack stays stateless apart from its repository volume.
+x-provision:
+  description: Gitea, backed by the shared Postgres cluster.
+  ingress: traefik
+  port: 3000
+  singleton: true
+  requires:
+    - traefik
+  required_env:
+    - GITEA_DB_PASSWORD
+  optional_env:
+    GITEA_DB_HOST: 10.10.0.20:5432
+    GITEA_DB_NAME: gitea
+    GITEA_DB_USER: gitea
+    GITEA_SSH_PORT: "2222"
+  data_dirs:
+    - data
+  healthcheck_url: http://localhost:3000/api/healthz
+
+services:
+  gitea:
+    image: gitea/gitea:1.23
+    container_name: gitea
+    restart: unless-stopped
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      TZ: ${TZ}
+      GITEA__server__DOMAIN: ${DOMAIN}
+      GITEA__server__ROOT_URL: https://${DOMAIN}/
+      GITEA__server__SSH_DOMAIN: ${DOMAIN}
+      GITEA__server__SSH_PORT: ${GITEA_SSH_PORT}
+      GITEA__database__DB_TYPE: postgres
+      GITEA__database__HOST: ${GITEA_DB_HOST}
+      GITEA__database__NAME: ${GITEA_DB_NAME}
+      GITEA__database__USER: ${GITEA_DB_USER}
+      GITEA__database__PASSWD: ${GITEA_DB_PASSWORD}
+      GITEA__service__DISABLE_REGISTRATION: "true"
+    volumes:
+      - ${DATA_ROOT}/data:/data
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "${GITEA_SSH_PORT}:22"
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+networks:
+  edge:
+    external: true

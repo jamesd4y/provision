@@ -1,0 +1,6 @@
+---
+- name: Reload nftables
+  ansible.builtin.service:
+    name: nftables
+    state: reloaded
+  when: firewall_enabled | bool

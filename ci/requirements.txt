@@ -1,0 +1,9 @@
+# Toolchain for the CI image. Kept separate from the repo's own requirements.txt
+# so bumping Ansible does not force every developer to reinstall it locally.
+PyYAML==6.0.2
+jsonschema==4.23.0
+referencing==0.35.1
+ansible-core==2.18.6
+ansible-lint==25.1.3
+yamllint==1.35.1
+pytest==8.3.4

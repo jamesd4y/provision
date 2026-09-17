@@ -1,0 +1,48 @@
+# Bring every host to its declared state: users, packages, Docker, firewall.
+# Idempotent, so re-running it on an unchanged fleet is a no-op that proves the
+# fleet is still what the repo says it is.
+when:
+  - event: push
+    branch: ${CI_REPO_DEFAULT_BRANCH}
+  - event: [manual, cron]
+
+depends_on:
+  - dns
+
+variables:
+  - &toolbox ghcr.io/jamesd4y/provision-ci:latest
+  - &bws_env
+    BWS_ACCESS_TOKEN:
+      from_secret: bws_access_token
+    BWS_PROJECT_ID:
+      from_secret: bws_project_id
+
+steps:
+  - name: scope
+    image: *toolbox
+    commands:
+      - mkdir -p build
+      - |
+        if [ "$CI_PIPELINE_EVENT" = "push" ]; then
+          git fetch --no-tags origin "$CI_PREV_COMMIT_SHA" 2>/dev/null || true
+          python3 scripts/changed.py --base "$CI_PREV_COMMIT_SHA" > build/changed.json
+        else
+          python3 scripts/changed.py --all > build/changed.json
+        fi
+      - jq -r '.hosts | join(",")' build/changed.json > build/limit.txt
+      - cat build/limit.txt
+
+  - name: converge
+    image: *toolbox
+    environment: *bws_env
+    commands:
+      - scripts/refresh_host_ips.sh
+      - eval "$(scripts/ssh_setup.sh)"
+      - |
+        limit="$(cat build/limit.txt)"
+        if [ -z "$limit" ]; then
+          echo "no hosts in scope for this change"
+          exit 0
+        fi
+        cd ansible
+        ansible-playbook site.yml --limit "$limit" --diff

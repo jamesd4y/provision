@@ -1,0 +1,55 @@
+#cloud-config
+# Rendered by OpenTofu from hosts/<folder>/<hostname>.yml.
+# Deliberately minimal: this exists only to get a host to the point where
+# Ansible can take over (a user, a key, python3, a working clock). Everything
+# else — Docker, firewall, hardening — belongs in ansible/roles/.
+hostname: ${hostname}
+fqdn: ${fqdn}
+prefer_fqdn_over_hostname: true
+timezone: ${timezone}
+
+users:
+  - name: ${ssh_user}
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+    lock_passwd: true
+    ssh_authorized_keys:
+%{ for key in ssh_keys ~}
+      - ${key}
+%{ endfor ~}
+
+package_update: true
+packages:
+  - python3
+  - python3-apt
+  - sudo
+  - ca-certificates
+  - curl
+  - gnupg
+  - qemu-guest-agent
+
+# No password logins, no root logins, ever. The firewall role re-asserts this,
+# so a host that skips cloud-init (baremetal) ends up in the same state.
+ssh_pwauth: false
+disable_root: true
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/10-provision.conf
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      PermitRootLogin no
+      KbdInteractiveAuthentication no
+  - path: /etc/provision-host.json
+    permissions: "0644"
+    content: |
+      {
+        "hostname": "${hostname}",
+        "provider": "${provider_name}",
+        "managed_by": "github.com/jamesd4y/provision"
+      }
+
+runcmd:
+  - [systemctl, enable, --now, qemu-guest-agent]
+  - [systemctl, restart, ssh]

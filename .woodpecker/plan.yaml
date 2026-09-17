@@ -1,0 +1,63 @@
+# What would change, posted on the pull request. Read-only: this pipeline holds
+# read credentials and never applies anything.
+when:
+  - event: pull_request
+
+depends_on:
+  - validate
+
+variables:
+  - &toolbox ghcr.io/jamesd4y/provision-ci:latest
+  - &bws_env
+    BWS_ACCESS_TOKEN:
+      from_secret: bws_access_token
+    BWS_PROJECT_ID:
+      from_secret: bws_project_id
+
+steps:
+  - name: scope
+    image: *toolbox
+    commands:
+      - mkdir -p build
+      - git fetch --no-tags origin "$CI_COMMIT_TARGET_BRANCH"
+      - python3 scripts/changed.py --base "origin/$CI_COMMIT_TARGET_BRANCH" > build/changed.json
+      - cat build/changed.json
+
+  - name: plan
+    image: *toolbox
+    environment: *bws_env
+    commands:
+      - python3 scripts/render_tfvars.py --all
+      # One plan per (stack, hosts/ folder) the diff can reach, plus DNS.
+      - python3 scripts/list_stacks.py --changed build/changed.json --include-cloudflare > build/plan_targets.txt
+      - cat build/plan_targets.txt
+      - |
+        while read -r stack workspace; do
+          [ -z "$stack" ] && continue
+          scripts/tofu.sh "$stack" "$workspace" plan -no-color -lock-timeout=5m \
+            | tee "build/plan-$stack-$workspace.txt"
+        done < build/plan_targets.txt
+
+  - name: comment
+    image: *toolbox
+    environment:
+      FORGE_TOKEN:
+        from_secret: forge_token
+    commands:
+      - |
+        # Best effort: a plan that cannot be posted is still in the step log.
+        if [ -z "${FORGE_TOKEN:-}" ]; then
+          echo "no forge_token secret; plans are in the step log above"
+          exit 0
+        fi
+        body="$(printf '### OpenTofu plan\n\n'; for f in build/plan-*.txt; do
+          printf '<details><summary>%s</summary>\n\n```\n%s\n```\n</details>\n\n' \
+            "$(basename "$f" .txt)" "$(tail -c 60000 "$f")"
+        done)"
+        curl -fsS -X POST \
+          -H "Authorization: token $FORGE_TOKEN" \
+          -H "Content-Type: application/json" \
+          --data "$(jq -n --arg b "$body" '{body: $b}')" \
+          "$CI_FORGE_URL/api/v1/repos/$CI_REPO/issues/$CI_COMMIT_PULL_REQUEST/comments" \
+          || echo "could not post the plan comment; it is in the step log above"
+    failure: ignore

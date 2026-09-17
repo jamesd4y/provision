@@ -1,0 +1,54 @@
+# Scheduled read-only audit. Answers one question: is the fleet still what the
+# repo says it is? It changes nothing, so it is safe to run often.
+#
+# Configure the schedule in Woodpecker (Settings -> Crons), e.g. daily at 06:00.
+when:
+  - event: cron
+    cron: drift
+  - event: manual
+
+variables:
+  - &toolbox ghcr.io/jamesd4y/provision-ci:latest
+  - &bws_env
+    BWS_ACCESS_TOKEN:
+      from_secret: bws_access_token
+    BWS_PROJECT_ID:
+      from_secret: bws_project_id
+
+steps:
+  - name: model
+    image: *toolbox
+    commands:
+      - python3 scripts/validate.py
+
+  - name: infrastructure-drift
+    image: *toolbox
+    environment: *bws_env
+    commands:
+      - python3 scripts/render_tfvars.py --all
+      - |
+        # -detailed-exitcode: 0 no changes, 2 changes pending, 1 error.
+        status=0
+        while read -r stack workspace; do
+          [ -z "${stack:-}" ] && continue
+          echo "== $stack/$workspace"
+          scripts/tofu.sh "$stack" "$workspace" plan -detailed-exitcode -no-color -lock-timeout=5m || rc=$?
+          case "${rc:-0}" in
+            0) echo "   in sync" ;;
+            2) echo "   DRIFT: the fleet differs from hosts/"; status=1 ;;
+            *) echo "   plan failed"; status=1 ;;
+          esac
+          rc=0
+        done < <(python3 scripts/list_stacks.py --provisioned --include-cloudflare)
+        exit "$status"
+
+  - name: host-drift
+    image: *toolbox
+    environment: *bws_env
+    commands:
+      - scripts/refresh_host_ips.sh
+      - eval "$(scripts/ssh_setup.sh)"
+      - cd ansible
+      # --check --diff reports what would change without changing it.
+      - ansible-playbook site.yml --check --diff
+      - ansible-playbook check.yml

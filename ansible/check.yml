@@ -1,0 +1,42 @@
+---
+# Read-only audit. Run it on a schedule to catch drift between what hosts/
+# claims and what the machines actually are — a baremetal box that lost a disk,
+# a VM someone resized by hand, a stack that is down.
+- name: Audit the fleet
+  hosts: all
+  gather_facts: true
+  become: true
+
+  tasks:
+    - name: Compare declared hardware against facts
+      ansible.builtin.include_role:
+        name: base
+        tasks_from: assert_hardware.yml
+      when: provision_declared_cpu is defined
+
+    - name: Check Docker is running
+      ansible.builtin.command: docker info --format '{{ "{{" }}.ServerVersion{{ "}}" }}'
+      register: docker_info
+      changed_when: false
+      failed_when: false
+      when: "'docker' in provision_roles"
+
+    - name: List running stacks
+      ansible.builtin.command: docker compose ls --format json
+      register: compose_ls
+      changed_when: false
+      failed_when: false
+      when: "'docker' in provision_roles"
+
+    - name: Parse the compose listing
+      ansible.builtin.set_fact:
+        _running_stacks: >-
+          {{ (compose_ls.stdout | from_json | map(attribute='Name') | list)
+             if (compose_ls.stdout | default('') | length > 0) else [] }}
+
+    - name: Report
+      ansible.builtin.debug:
+        msg:
+          - "docker: {{ docker_info.stdout | default('not installed') }}"
+          - "declared stacks: {{ provision_services | map(attribute='name') | list }}"
+          - "running stacks: {{ _running_stacks }}"

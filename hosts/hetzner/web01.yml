@@ -1,0 +1,84 @@
+hostname: web01
+fqdn: web01.example.com
+description: Public edge — Traefik, Gitea, status page.
+enabled: true
+tags:
+  - prod
+  - edge
+
+hardware:
+  # cpu + memory pick the cheapest Hetzner server type that fits.
+  # Set provider_options.server_type to pin one explicitly.
+  cpu: 2
+  memory: 4096
+  storage:
+    - name: root
+      size: 40
+      type: ssd
+      mount: /
+    - name: data
+      size: 100
+      type: network
+      mount: /srv
+      format: ext4
+
+os:
+  distribution: debian
+  version: "13"
+
+network:
+  ipv6_enabled: true
+  firewall:
+    - name: ssh
+      port: "22"
+      protocol: tcp
+      source:
+        - 10.10.0.0/16
+    - name: http
+      port: "80"
+      protocol: tcp
+    - name: https
+      port: "443"
+      protocol: tcp
+
+ansible:
+  user: deploy
+  roles:
+    - base
+    - docker
+    - firewall
+    - node_exporter
+  vars:
+    unattended_upgrades: true
+    swap_size_mb: 2048
+
+dns:
+  zone: example.com
+  record: web01
+  proxied: false
+  extra_records:
+    - name: "@"
+      type: CAA
+      value: '0 issue "letsencrypt.org"'
+      comment: only Let's Encrypt may issue for this zone
+
+services:
+  - name: traefik
+    secrets:
+      CF_DNS_API_TOKEN: cloudflare/acme_dns_token
+    env:
+      ACME_EMAIL: ops@example.com
+
+  - name: gitea
+    domains:
+      - name: git.example.com
+        proxied: true
+    env:
+      GITEA_SSH_PORT: "2222"
+    secrets:
+      GITEA_DB_PASSWORD: gitea/db_password
+      GITEA__mailer__PASSWD: gitea/smtp_password
+
+  - name: uptime-kuma
+    domains:
+      - status.example.com

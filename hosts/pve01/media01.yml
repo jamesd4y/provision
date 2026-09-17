@@ -1,0 +1,61 @@
+hostname: media01
+fqdn: media01.lan
+description: Media stack VM on the home Proxmox node.
+enabled: true
+tags:
+  - homelab
+  - media
+
+hardware:
+  cpu: 4
+  memory: 8192
+  storage:
+    - name: root
+      size: 32
+      type: ssd
+      mount: /
+    - name: media
+      size: 500
+      type: hdd
+      mount: /srv/media
+      format: ext4
+
+os:
+  distribution: debian
+  version: "13"
+
+network:
+  private_ipv4: 10.20.0.30
+  firewall:
+    - name: ssh
+      port: "22"
+      source:
+        - 10.20.0.0/24
+
+provider_options:
+  vm_id: 130
+  start_on_boot: true
+  backups: true
+
+ansible:
+  roles:
+    - base
+    - docker
+    - node_exporter
+  vars:
+    swap_size_mb: 2048
+
+dns:
+  zone: example.com
+  record: media01
+
+services:
+  - name: traefik
+    secrets:
+      CF_DNS_API_TOKEN: cloudflare/acme_dns_token
+    env:
+      ACME_EMAIL: ops@example.com
+  - name: uptime-kuma
+    domains:
+      - name: home-status.example.com
+        proxied: true

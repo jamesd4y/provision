@@ -1,0 +1,28 @@
+---
+# nftables filters traffic terminating on the host. It deliberately does NOT try
+# to filter published container ports: Docker DNATs those in the ip nat table
+# before the inet filter input chain ever sees them. Keep container exposure
+# under control by binding published ports to a private address (see
+# services/postgres.yml) and by the cloud firewall in the host's YAML, which is
+# enforced outside the machine and cannot be bypassed from inside it.
+- name: Install nftables
+  ansible.builtin.apt:
+    name: nftables
+    state: present
+  tags: [firewall]
+
+- name: Write the ruleset
+  ansible.builtin.template:
+    src: provision.nft.j2
+    dest: /etc/nftables.conf
+    mode: "0644"
+    validate: nft -c -f %s
+  notify: Reload nftables
+  tags: [firewall]
+
+- name: Enable nftables
+  ansible.builtin.service:
+    name: nftables
+    state: "{{ 'started' if firewall_enabled else 'stopped' }}"
+    enabled: "{{ firewall_enabled }}"
+  tags: [firewall]

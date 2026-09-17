@@ -1,0 +1,60 @@
+hostname: db01
+fqdn: db01.example.com
+description: Private Postgres for the web tier. No public ingress.
+enabled: true
+tags:
+  - prod
+  - data
+
+hardware:
+  cpu: 4
+  memory: 8192
+  storage:
+    - name: root
+      size: 40
+      mount: /
+    - name: pgdata
+      size: 200
+      type: nvme
+      mount: /srv/postgres
+      format: xfs
+
+os:
+  distribution: debian
+  version: "13"
+
+network:
+  # Private-only: no public v4 at all, reached over the Hetzner private network.
+  ipv4_enabled: false
+  ipv6_enabled: true
+  private_ipv4: 10.10.0.20
+  firewall:
+    - name: ssh
+      port: "22"
+      source:
+        - 10.10.0.0/16
+    - name: postgres
+      port: "5432"
+      source:
+        - 10.10.0.0/16
+
+ansible:
+  roles:
+    - base
+    - docker
+    - firewall
+    - node_exporter
+  vars:
+    swap_size_mb: 4096
+
+dns:
+  zone: example.com
+  record: db01
+
+services:
+  - name: postgres
+    secrets:
+      POSTGRES_PASSWORD: postgres/superuser_password
+    env:
+      POSTGRES_DB: gitea
+      POSTGRES_USER: gitea

@@ -1,0 +1,59 @@
+# Create and reshape machines. Runs only on the default branch, only after
+# validate passed, and only for the hosts the merge actually touched.
+when:
+  - event: push
+    branch: ${CI_REPO_DEFAULT_BRANCH}
+  - event: manual
+
+depends_on:
+  - validate
+
+variables:
+  - &toolbox ghcr.io/jamesd4y/provision-ci:latest
+  - &bws_env
+    BWS_ACCESS_TOKEN:
+      from_secret: bws_access_token
+    BWS_PROJECT_ID:
+      from_secret: bws_project_id
+
+steps:
+  - name: scope
+    image: *toolbox
+    commands:
+      - mkdir -p build
+      - |
+        # On a push, diff against what was there before the merge. On a manual
+        # run, treat everything as in scope.
+        if [ "$CI_PIPELINE_EVENT" = "manual" ]; then
+          python3 scripts/changed.py --all > build/changed.json
+        else
+          git fetch --no-tags origin "$CI_PREV_COMMIT_SHA" 2>/dev/null || true
+          python3 scripts/changed.py --base "$CI_PREV_COMMIT_SHA" > build/changed.json
+        fi
+      - cat build/changed.json
+
+  - name: apply
+    image: *toolbox
+    environment: *bws_env
+    commands:
+      - python3 scripts/host_ips.py --reset > /dev/null
+      - python3 scripts/render_tfvars.py --all
+      - python3 scripts/list_stacks.py --changed build/changed.json > build/apply_targets.txt
+      - cat build/apply_targets.txt
+      - |
+        while read -r stack workspace; do
+          [ -z "$stack" ] && continue
+          scripts/tofu.sh "$stack" "$workspace" apply -auto-approve -lock-timeout=10m
+          python3 scripts/host_ips.py --from-tofu "$stack" --workspace "$workspace"
+        done < build/apply_targets.txt
+      - |
+        # Later pipelines need the addresses this stage discovered.
+        cat build/host_ips.json
+
+  - name: addresses
+    image: *toolbox
+    environment: *bws_env
+    commands:
+      # Read every provisioned folder, not just the changed ones, so the log
+      # shows the whole fleet's addressing after the apply.
+      - scripts/refresh_host_ips.sh

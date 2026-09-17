@@ -1,0 +1,46 @@
+# A single Proxmox node. One folder per Proxmox host: pve02/ would be its own
+# folder with its own _config.yml, so a node's VMs are always co-located in the tree.
+provider: pve01
+kind: proxmox
+enabled: true
+description: Proxmox node in the home rack.
+
+credentials:
+  api_token: proxmox/pve01_api_token   # user@pam!tokenid=uuid
+  ssh_password: proxmox/pve01_root_password
+
+endpoint:
+  url: https://pve01.lan:8006/
+  node: pve01
+  insecure: false
+
+ssh_keys:
+  - name: woodpecker-ci
+    public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEcikeyREPLACEmeWITHyourCIkey ci@provision
+
+network:
+  bridge: vmbr0
+  vlan_id: 20
+  gateway: 10.20.0.1
+  prefix: 24
+  nameservers:
+    - 10.20.0.1
+    - 1.1.1.1
+  search_domain: lan
+  snippet_datastore: local   # must have the "snippets" content type enabled
+
+defaults:
+  datastore: local-zfs
+  template: debian-13-cloudinit
+  os:
+    distribution: debian
+    version: "13"
+    timezone: Europe/London
+  ansible:
+    user: deploy
+    port: 22
+  dns:
+    zone: example.com
+    proxied: false
+  tags:
+    - homelab

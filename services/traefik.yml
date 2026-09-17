@@ -1,0 +1,61 @@
+# Reverse proxy and TLS terminator. Every host that serves HTTP runs one.
+# Certificates come from Let's Encrypt over the Cloudflare DNS-01 challenge, so
+# hosts behind NAT get real certs without exposing port 80 to the world.
+x-provision:
+  description: Traefik v3 edge proxy with Cloudflare DNS-01 certificates.
+  ingress: host-port
+  singleton: false
+  required_env:
+    - CF_DNS_API_TOKEN
+    - ACME_EMAIL
+  optional_env:
+    TRAEFIK_LOG_LEVEL: INFO
+  data_dirs:
+    - acme
+    - logs
+
+services:
+  traefik:
+    image: traefik:v3.3
+    container_name: traefik
+    restart: unless-stopped
+    command:
+      - --log.level=${TRAEFIK_LOG_LEVEL}
+      - --accesslog=true
+      - --accesslog.filepath=/var/log/traefik/access.log
+      - --api.dashboard=false
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=edge
+      - --entrypoints.web.address=:80
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.websecure.http.tls.certresolver=cloudflare
+      - --certificatesresolvers.cloudflare.acme.email=${ACME_EMAIL}
+      - --certificatesresolvers.cloudflare.acme.storage=/acme/acme.json
+      - --certificatesresolvers.cloudflare.acme.dnschallenge=true
+      - --certificatesresolvers.cloudflare.acme.dnschallenge.provider=cloudflare
+      - --certificatesresolvers.cloudflare.acme.dnschallenge.resolvers=1.1.1.1:53,1.0.0.1:53
+    environment:
+      CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN}
+      TZ: ${TZ}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${DATA_ROOT}/acme:/acme
+      - ${DATA_ROOT}/logs:/var/log/traefik
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+networks:
+  edge:
+    external: true

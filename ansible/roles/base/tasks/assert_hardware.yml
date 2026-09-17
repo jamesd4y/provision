@@ -1,0 +1,42 @@
+---
+# hosts/<provider>/<hostname>.yml claims a shape. For a cloud host OpenTofu made
+# it true; for baremetal it is a claim about a machine nobody here controls.
+# Either way, a mismatch means the repo is lying, so say so.
+- name: Compute the hardware comparison
+  ansible.builtin.set_fact:
+    base_hw_cpu: "{{ ansible_processor_vcpus | int }}"
+    base_hw_mem: "{{ ansible_memtotal_mb | int }}"
+    base_hw_mem_floor: >-
+      {{ (provision_declared_memory_mb | int)
+         * (100 - (hardware_memory_tolerance_pct | int)) // 100 }}
+    base_hw_fatal: "{{ provision_kind in hardware_assert_fatal_kinds }}"
+
+- name: Report the comparison
+  ansible.builtin.debug:
+    msg: >-
+      declared {{ provision_declared_cpu }} vCPU / {{ provision_declared_memory_mb }} MiB,
+      found {{ base_hw_cpu }} vCPU / {{ base_hw_mem }} MiB
+      (floor {{ base_hw_mem_floor }} MiB)
+
+- name: Fail when a described machine does not match its description
+  ansible.builtin.assert:
+    that:
+      - base_hw_cpu | int >= provision_declared_cpu | int
+      - base_hw_mem | int >= base_hw_mem_floor | int
+    fail_msg: >-
+      {{ inventory_hostname }} does not match hosts/{{ provision_provider }}/{{ inventory_hostname }}.yml:
+      declared {{ provision_declared_cpu }} vCPU / {{ provision_declared_memory_mb }} MiB,
+      found {{ base_hw_cpu }} vCPU / {{ base_hw_mem }} MiB.
+      Fix the machine or fix the file.
+    success_msg: hardware matches the declaration
+  when: base_hw_fatal | bool
+
+- name: Warn when a provisioned machine drifted from its description
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: {{ inventory_hostname }} has {{ base_hw_cpu }} vCPU / {{ base_hw_mem }} MiB
+      but hosts/ declares {{ provision_declared_cpu }} / {{ provision_declared_memory_mb }}.
+      Run the provision stage to reconcile.
+  when:
+    - not (base_hw_fatal | bool)
+    - (base_hw_cpu | int < provision_declared_cpu | int) or (base_hw_mem | int < base_hw_mem_floor | int)
