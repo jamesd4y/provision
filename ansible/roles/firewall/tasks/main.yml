@@ -17,6 +17,7 @@
   tags: [firewall]
 
 - name: Install nftables
+  when: not (provision_microos | default(false))
   ansible.builtin.apt:
     name: nftables
     state: present

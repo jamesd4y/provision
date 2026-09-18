@@ -11,7 +11,7 @@ from lib.model import ModelError
 
 def test_example_fleet_loads(repo):
     assert set(repo.providers) == {"hetzner", "pve01", "baremetal"}
-    assert set(repo.hosts) == {"web01", "db01", "media01", "nas01"}
+    assert set(repo.hosts) == {"web01", "db01", "media01", "nas01", "edge01"}
     assert "traefik" in repo.services
 
 

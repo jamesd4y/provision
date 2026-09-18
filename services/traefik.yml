@@ -5,14 +5,25 @@ x-provision:
   description: Traefik v3 edge proxy with Cloudflare DNS-01 certificates.
   ingress: host-port
   singleton: false
+  metrics:
+    port: 8082
+    path: /metrics
   required_env:
     - CF_DNS_API_TOKEN
     - ACME_EMAIL
   optional_env:
     TRAEFIK_LOG_LEVEL: INFO
+    TRAEFIK_METRICS_BIND: 127.0.0.1
+    TRAEFIK_METRICS_PORT: "8082"
   data_dirs:
     - acme
     - logs
+  backup:
+    # acme.json holds issued certificates. Losing it is survivable — Traefik
+    # re-issues — but re-issuing the whole fleet at once can hit Let's Encrypt
+    # rate limits, so it is worth keeping. Logs are shipped to VictoriaLogs.
+    paths:
+      - acme
 
 services:
   traefik:
@@ -31,6 +42,14 @@ services:
       - --entrypoints.web.http.redirections.entrypoint.to=websecure
       - --entrypoints.web.http.redirections.entrypoint.scheme=https
       - --entrypoints.websecure.address=:443
+      # Metrics on their own entrypoint, published to loopback only so vmagent
+      # can scrape them and nothing else can.
+      - --entrypoints.metrics.address=:8082
+      - --metrics.prometheus=true
+      - --metrics.prometheus.entrypoint=metrics
+      - --metrics.prometheus.addEntryPointsLabels=true
+      - --metrics.prometheus.addRoutersLabels=true
+      - --metrics.prometheus.addServicesLabels=true
       - --entrypoints.websecure.http.tls.certresolver=cloudflare
       - --certificatesresolvers.cloudflare.acme.email=${ACME_EMAIL}
       - --certificatesresolvers.cloudflare.acme.storage=/acme/acme.json
@@ -44,6 +63,7 @@ services:
       - "80:80"
       - "443:443"
       - "443:443/udp"
+      - "${TRAEFIK_METRICS_BIND}:${TRAEFIK_METRICS_PORT}:8082"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ${DATA_ROOT}/acme:/acme

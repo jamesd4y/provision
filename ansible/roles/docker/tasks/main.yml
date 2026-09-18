@@ -1,5 +1,10 @@
 ---
+# MicroOS installs Docker through Ignition/Combustion at first boot, because
+# transactional-update needs a reboot to make a package usable. Everything
+# below the install is still applied: the daemon config, the edge network and
+# the stack directories are the same on both.
 - name: Ensure the apt keyring directory exists
+  when: not (provision_microos | default(false))
   ansible.builtin.file:
     path: /etc/apt/keyrings
     state: directory
@@ -15,6 +20,7 @@
   tags: [docker]
 
 - name: Add the Docker repository
+  when: not (provision_microos | default(false))
   ansible.builtin.apt_repository:
     repo: >-
       deb [arch={{ 'arm64' if ansible_architecture == 'aarch64' else 'amd64' }}
@@ -26,6 +32,7 @@
   tags: [docker]
 
 - name: Install Docker Engine and the Compose plugin
+  when: not (provision_microos | default(false))
   ansible.builtin.apt:
     name:
       - docker-ce

@@ -78,6 +78,18 @@ def hostvars(repo: Repo, host: Host) -> dict:
         "tailscale_extra_args": tailscale.get("extra_args", []),
         "provision_timezone": host.os.get("timezone", "UTC"),
         "provision_os": host.os,
+        # MicroOS has no apt and no mutable /usr: packages arrive via Ignition
+        # and Combustion at first boot, so the roles skip installation there
+        # and manage configuration and services only.
+        "provision_microos": host.is_microos,
+        # Backups. The plan is computed from the stacks this host runs, so the
+        # role renders it rather than deciding it.
+        "provision_backup": model.backup_plan(repo, host),
+        "provision_backup_repository": (
+            (repo.backup.get("repository") or {}).get("url", "").format(host=host.name)
+            if repo.backup else ""
+        ),
+        "provision_backup_staging": model.BACKUP_STAGING_ROOT,
         **(host.ansible.get("vars") or {}),
     }
 

@@ -25,6 +25,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import render_ignition
+
 from lib import model
 from lib.model import Host, ModelError, Repo
 
@@ -99,7 +101,26 @@ def host_common(host: Host) -> dict:
         "ssh_user": host.ansible.get("user", "deploy"),
         "labels": {tag.replace(":", "_"): "true" for tag in host.tags},
         "options": host.raw.get("provider_options", {}) or {},
+        # MicroOS hosts are delivered an Ignition config instead of cloud-init.
+        # Ignition reads it from instance userdata on both providers (platform
+        # ids `hetzner` and `proxmoxve`), so the delivery path is the same one
+        # cloud-init already uses. The bootstrap key is a placeholder here and
+        # is substituted by the stack at apply time.
+        "ignition": _ignition_for(host),
     }
+
+
+def _ignition_for(host: Host) -> str:
+    if not host.is_microos:
+        return ""
+    repo = _REPO[0]
+    config = render_ignition.render_ignition(repo, host, render_ignition.AUTH_KEY_PLACEHOLDER)
+    return json.dumps(config, separators=(",", ":"))
+
+
+# host_common has no Repo to hand, and threading one through every call site to
+# reach the tailnet config would be worse than this.
+_REPO: list[Repo] = []
 
 
 def render_provider_folder(repo: Repo, provider_name: str) -> dict:
@@ -331,7 +352,10 @@ def main() -> int:
     if not args.stack and not args.all:
         parser.error("pass --stack <name> or --all")
 
-    render_all(model.load_repo(), None if args.all else args.stack, args.dry_run)
+    repo = model.load_repo()
+    _REPO.clear()
+    _REPO.append(repo)
+    render_all(repo, None if args.all else args.stack, args.dry_run)
     return 0
 
 

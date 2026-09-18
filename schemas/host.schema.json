@@ -175,7 +175,8 @@
             "ubuntu",
             "rocky",
             "alma",
-            "fedora"
+            "fedora",
+            "microos"
           ]
         },
         "version": {
@@ -518,7 +519,8 @@
             "ubuntu",
             "rocky",
             "alma",
-            "fedora"
+            "fedora",
+            "microos"
           ]
         },
         "version": {

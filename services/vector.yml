@@ -29,6 +29,11 @@ x-provision:
     VECTOR_EXCLUDE_CONTAINERS: vector
   data_dirs:
     - data
+  backup:
+    enabled: false
+    reason: >-
+      The only thing here is Vector's disk buffer — logs not yet delivered.
+      Restoring it would replay whatever was queued at backup time.
 
 services:
   vector:

@@ -41,9 +41,13 @@
   retries: 3
   delay: 10
   until: base_apt is succeeded
+  when: not (provision_microos | default(false))
   tags: [base]
 
 - name: Configure unattended upgrades
+  # MicroOS updates itself transactionally on its own timer; apt's equivalent
+  # does not exist there.
+  when: not (provision_microos | default(false))
   ansible.builtin.copy:
     dest: /etc/apt/apt.conf.d/20auto-upgrades
     mode: "0644"

@@ -1,0 +1,23 @@
+---
+# Most of this comes from backup/config.yml through group_vars; these are the
+# fallbacks if it is missing.
+backup_enabled: true
+backup_repository: "{{ provision_backup_repository | default('') }}"
+backup_schedule: "*-*-* 02:30:00"
+backup_randomized_delay: 45m
+backup_timeout: 4h
+backup_retention:
+  daily: 7
+  weekly: 5
+  monthly: 12
+  yearly: 2
+backup_prune_schedule: "Sun *-*-* 05:00:00"
+backup_check_schedule: "Sun *-*-* 06:00:00"
+backup_check_read_data_subset: 5%
+
+# Injected by the pipeline from Bitwarden; never stored in the repo.
+backup_password: "{{ lookup('env', 'RESTIC_PASSWORD') }}"
+backup_ssh_key: "{{ lookup('env', 'RESTIC_SSH_KEY') }}"
+
+backup_config_dir: /etc/provision-backup
+backup_staging_dir: "{{ provision_backup_staging | default('/var/lib/provision-backup') }}"

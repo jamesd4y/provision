@@ -2,7 +2,11 @@
 # Joining the tailnet is the first thing that happens to a host, because it is
 # how everything afterwards is reached — including the SSH session that runs the
 # firewall role and closes the public path.
+# On MicroOS, Ignition installed tailscale and joined the tailnet at first
+# boot; there would be no way to reach the host otherwise. The registration and
+# settings tasks below still run and are still idempotent.
 - name: Ensure the apt keyring directory exists
+  when: not (provision_microos | default(false))
   ansible.builtin.file:
     path: /usr/share/keyrings
     state: directory
@@ -10,6 +14,7 @@
   tags: [tailscale]
 
 - name: Install the Tailscale apt keyring
+  when: not (provision_microos | default(false))
   ansible.builtin.get_url:
     url: >-
       https://pkgs.tailscale.com/stable/{{ ansible_distribution | lower }}/{{
@@ -20,6 +25,7 @@
   tags: [tailscale]
 
 - name: Add the Tailscale repository
+  when: not (provision_microos | default(false))
   ansible.builtin.apt_repository:
     repo: >-
       deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg]
@@ -30,6 +36,7 @@
   tags: [tailscale]
 
 - name: Install tailscale
+  when: not (provision_microos | default(false))
   ansible.builtin.apt:
     name: tailscale
     state: present

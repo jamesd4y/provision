@@ -14,6 +14,18 @@ x-provision:
     POSTGRES_PORT: "5432"
   data_dirs:
     - data
+  backup:
+    # Deliberately NOT the data directory: copying live Postgres files gives
+    # you a torn page you will discover at restore time. pg_dumpall runs against
+    # the running server and is consistent by construction, with no downtime.
+    paths: []
+    pre:
+      - >-
+        docker exec -i postgres sh -c
+        'pg_dumpall -U "$POSTGRES_USER" --clean --if-exists'
+        > "$STAGING/all.sql"
+    post:
+      - rm -f "$STAGING/all.sql"
 
 services:
   postgres:

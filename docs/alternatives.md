@@ -179,7 +179,56 @@ collecting traces too and want one agent for everything (OpenTelemetry).
 
 ---
 
-## 8. Which CI
+## 8. How metrics get off a host
+
+**Chosen: vmagent per host, scraping loopback, remote-writing to VictoriaMetrics.**
+
+Deliberately the same shape as the log pipeline: a collector per host that
+buffers to disk, and one store. Targets are generated from each host's own
+bindings rather than discovered. Full reasoning in [metrics.md](metrics.md).
+
+| Option | Why you'd want it | Why not here |
+|---|---|---|
+| **vmagent per host** *(chosen)* | Disk buffer and retry, so a store restart costs nothing; exporters stay on loopback; one agent to reason about per host | One more container per host |
+| VictoriaMetrics scrapes centrally | Nothing extra per host, and the tailnet makes every host reachable | A store outage is a hole in the data with nothing buffering, and every exporter would have to be exposed on the tailnet rather than loopback |
+| Prometheus scraping, VM as storage | Familiar, existing rules and tooling | Two systems doing one job, both of which have to stay up |
+| vmagent per site | Fewer containers, still buffers | One vmagent down blinds several hosts, and exporters can no longer stay on loopback |
+
+**Also considered and rejected: Docker service discovery.** vmagent supports
+`docker_sd_configs`, and it would remove the generated target list. Generating
+it means a missing target shows up as a diff in a pull request rather than as an
+empty dashboard three weeks later.
+
+---
+
+## 9. How data is backed up
+
+**Chosen: restic to TrueNAS over SFTP, with per-service pre/post hooks.**
+
+Deduplication was the requirement and TrueNAS the destination, which makes
+restic the obvious fit: content-addressed chunks, client-side encryption, and a
+single static binary a systemd timer can drive. [backups.md](backups.md) has the
+detail, including why ZFS dedup should stay off underneath it.
+
+| Option | Why you'd want it | Why not here |
+|---|---|---|
+| **restic** *(chosen)* | Dedup and encryption client-side, S3/SFTP/rest backends, trivial to run from a timer, `check --read-data-subset` verifies content | Prune rewrites the repository and must not overlap a backup; no native append-only over plain SFTP |
+| Borg / borgmatic | Excellent dedup, append-only mode protects against a compromised host | Needs a borg-aware server; object storage is not a direct target, and the destination here is a NAS |
+| Kopia | Fast, good compression, built-in server and UI | Smaller ecosystem; fewer people have driven it through a 3am restore |
+| ZFS send/receive to TrueNAS | Nearly free on a ZFS host, instant snapshots | Only works if every host is ZFS, which the cloud hosts are not; and it captures a live database as faithfully as a file copy does — which is to say, not usefully |
+
+**Consistency: per-service hooks rather than stopping the stack.** Postgres
+dumps itself, SQLite uses `.backup`, everything else is just files. Stopping
+each stack would be simpler and always correct, but it turns every night into a
+short outage; a filesystem snapshot would avoid that but gives crash-consistency,
+which is not the same as a clean dump.
+
+**Switch if:** you want a host to be unable to delete its own history — that is
+rest-server in append-only mode, and only the repository URL changes.
+
+---
+
+## 10. Which CI
 
 **Given: Woodpecker.**
 

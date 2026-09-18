@@ -55,6 +55,7 @@ variable "hosts" {
       protocol = optional(string, "tcp")
       source   = optional(list(string), ["0.0.0.0/0", "::/0"])
     })), [])
+    ignition = optional(string, "")
     ssh_user = optional(string, "deploy")
     labels   = optional(map(string), {})
     options  = optional(any, {})

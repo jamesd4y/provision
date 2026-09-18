@@ -1,0 +1,53 @@
+# The metrics store, alongside VictoriaLogs. Same rules apply: no authentication
+# of its own, so it binds loopback by default and a host that serves other hosts
+# widens it to an address only the private network and the tailnet can reach.
+x-provision:
+  description: VictoriaMetrics — the metrics store vmagent remote-writes to.
+  ingress: none
+  singleton: false
+  metrics:
+    port: 8428
+    path: /metrics
+  optional_env:
+    VICTORIAMETRICS_BIND: 127.0.0.1
+    VICTORIAMETRICS_PORT: "8428"
+    VICTORIAMETRICS_RETENTION: 13months
+    VICTORIAMETRICS_MAX_DISK_BYTES: "0"      # 0 = no cap; retention alone decides
+    VICTORIAMETRICS_MEMORY_PERCENT: "40"
+    VICTORIAMETRICS_DEDUP_INTERVAL: 0s
+  data_dirs:
+    - data
+  backup:
+    enabled: false
+    reason: >-
+      Same reasoning as the log store. If this history does become worth keeping,
+      use vmbackup against a VictoriaMetrics snapshot rather than restic over a
+      live data directory — copying it while it is being written does not give a
+      restorable database.
+
+services:
+  victoria-metrics:
+    image: victoriametrics/victoria-metrics:v1.152.0
+    container_name: victoria-metrics
+    restart: unless-stopped
+    command:
+      - -storageDataPath=/victoria-metrics-data
+      - -httpListenAddr=:8428
+      - -retentionPeriod=${VICTORIAMETRICS_RETENTION}
+      - -storage.maxDiskSpaceUsageBytes=${VICTORIAMETRICS_MAX_DISK_BYTES}
+      - -dedup.minScrapeInterval=${VICTORIAMETRICS_DEDUP_INTERVAL}
+      - -memory.allowedPercent=${VICTORIAMETRICS_MEMORY_PERCENT}
+      - -loggerTimezone=${TZ}
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - ${DATA_ROOT}/data:/victoria-metrics-data
+    ports:
+      - "${VICTORIAMETRICS_BIND}:${VICTORIAMETRICS_PORT}:8428"
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8428/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s

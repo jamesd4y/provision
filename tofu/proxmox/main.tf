@@ -65,17 +65,22 @@ resource "proxmox_virtual_environment_file" "cloud_init" {
   content_type = "snippets"
 
   source_raw {
-    file_name = "${each.key}-user-data.yaml"
-    data = templatefile("${path.module}/../templates/cloud-init.yaml.tftpl", {
-      hostname           = each.value.hostname
-      fqdn               = each.value.fqdn
-      timezone           = each.value.timezone
-      ssh_user           = each.value.ssh_user
-      provider_name      = var.provider_name
-      ssh_keys           = [for key in var.ssh_keys : key.public_key]
-      tailscale_auth_key = var.tailscale_auth_key
-      tailscale_hostname = each.value.hostname
-      tailscale_tags     = var.tailscale_tags
+    # Ignition reads its config from the cloud-init drive's user-data on
+    # Proxmox (platform id `proxmoxve`), so a MicroOS host gets JSON here where
+    # a Debian host gets cloud-config.
+    file_name = each.value.ignition != "" ? "${each.key}-config.ign" : "${each.key}-user-data.yaml"
+    data = each.value.ignition != "" ? replace(
+      each.value.ignition, "__TS_AUTH_KEY__", var.tailscale_auth_key
+      ) : templatefile("${path.module}/../templates/cloud-init.yaml.tftpl", {
+        hostname           = each.value.hostname
+        fqdn               = each.value.fqdn
+        timezone           = each.value.timezone
+        ssh_user           = each.value.ssh_user
+        provider_name      = var.provider_name
+        ssh_keys           = [for key in var.ssh_keys : key.public_key]
+        tailscale_auth_key = var.tailscale_auth_key
+        tailscale_hostname = each.value.hostname
+        tailscale_tags     = var.tailscale_tags
     })
   }
 

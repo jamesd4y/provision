@@ -48,6 +48,15 @@ RUN curl -fsSL "https://github.com/bitwarden/sdk-sm/releases/download/bws-v${BWS
 
 # Built with the repo root as the build context, so the collection list stays
 # the single one in ansible/requirements.yml rather than a copy that drifts.
+# ignition-validate, so a MicroOS config that would fail at first boot fails in
+# CI instead — on a host with no SSH, a bad Ignition config is unrecoverable
+# without the provider console.
+ARG IGNITION_VERSION=v2.22.0
+RUN curl -fsSL "https://github.com/coreos/ignition/releases/download/${IGNITION_VERSION}/ignition-validate-x86_64-linux" \
+      -o /usr/local/bin/ignition-validate \
+    && chmod 0755 /usr/local/bin/ignition-validate \
+    && ignition-validate --version
+
 COPY ci/requirements.txt /tmp/requirements.txt
 COPY ansible/requirements.yml /tmp/ansible-requirements.yml
 

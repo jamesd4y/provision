@@ -1,0 +1,14 @@
+[Unit]
+Description=Prune unreferenced data from the restic repository
+After=network-online.target
+Wants=network-online.target
+# Pruning rewrites the repository; it must never overlap a backup.
+Conflicts=provision-backup.service
+
+[Service]
+Type=oneshot
+EnvironmentFile={{ backup_config_dir }}/environment
+ExecStart=/usr/bin/restic prune
+TimeoutStartSec={{ backup_timeout }}
+Nice=15
+IOSchedulingClass=idle

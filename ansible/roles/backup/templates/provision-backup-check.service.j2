@@ -1,0 +1,16 @@
+[Unit]
+Description=Verify the restic repository by reading data back
+After=network-online.target
+Wants=network-online.target
+Conflicts=provision-backup.service provision-backup-prune.service
+
+[Service]
+Type=oneshot
+EnvironmentFile={{ backup_config_dir }}/environment
+# --read-data-subset actually fetches and verifies content. `restic check`
+# without it only checks the repository's own structure, which would not notice
+# the NAS quietly returning corrupt blobs.
+ExecStart=/usr/bin/restic check --read-data-subset={{ backup_check_read_data_subset }}
+TimeoutStartSec={{ backup_timeout }}
+Nice=15
+IOSchedulingClass=idle

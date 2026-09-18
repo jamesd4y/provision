@@ -1,0 +1,8 @@
+# Managed by github.com/jamesd4y/provision — local edits are overwritten.
+# Sourced by the backup script. Mode 0600, root-owned.
+RESTIC_REPOSITORY={{ backup_repository }}
+RESTIC_PASSWORD={{ backup_password }}
+{% if backup_ssh_key | length > 0 %}
+# Use a dedicated key for the NAS rather than the host's deploy identity.
+RESTIC_OPTIONS=sftp.args=-i {{ backup_config_dir }}/id_backup -o StrictHostKeyChecking=accept-new
+{% endif %}

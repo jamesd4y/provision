@@ -12,6 +12,7 @@ hosts/<provider>/<hostname>.yml  one machine: cpu, memory, storage, os, services
 services/<name>.yml              one Docker Compose stack, portable across hosts
 cloudflare/zones.yml             the DNS zones this repo is allowed to touch
 tailscale/tailnet.yml            the tailnet every host joins
+backup/config.yml                where backups go and how long they are kept
 ```
 
 ## How a change reaches production
@@ -45,6 +46,8 @@ that one stack on the hosts that run it, not the fleet. See
 | DNS | OpenTofu (Cloudflare) | `tofu/cloudflare/` |
 | Network | Tailscale mesh; no host has public SSH | `ansible/roles/tailscale/` |
 | Logs | Vector → VictoriaLogs, one store for the fleet | `services/vector.yml` |
+| Metrics | vmagent → VictoriaMetrics, scraped over loopback | `services/vmagent.yml` |
+| Backups | restic to TrueNAS, per-service hooks | `ansible/roles/backup/` |
 | Secrets | Bitwarden Secrets Manager | `scripts/secrets.sh` |
 
 Why these and not the alternatives: [docs/alternatives.md](docs/alternatives.md).
@@ -136,6 +139,7 @@ python3 scripts/validate.py                      # schema + cross-references
 python3 -m pytest tests/ -q                      # the rules that schemas cannot express
 python3 scripts/inventory.py --list | jq         # the Ansible inventory, from hosts/
 python3 scripts/render_stack.py --host web01     # what would land on the host
+python3 scripts/render_ignition.py --all         # MicroOS first-boot configs
 python3 scripts/changed.py --base origin/main    # what a diff would actually touch
 ```
 
@@ -159,6 +163,9 @@ cd ansible && ansible-playbook site.yml --limit web01 --check --diff
 - [docs/adding-a-service.md](docs/adding-a-service.md)
 - [docs/provisioning.md](docs/provisioning.md) — Hetzner, Proxmox templates, adopting a baremetal box
 - [docs/tailscale.md](docs/tailscale.md) — how hosts are reached, and what to do if you get locked out
+- [docs/metrics.md](docs/metrics.md) — host and container metrics, and why exporters stay on loopback
 - [docs/logging.md](docs/logging.md) — where container logs go, and why not via Docker's log driver
+- [docs/backups.md](docs/backups.md) — restic to TrueNAS, and how a database is captured consistently
+- [docs/microos.md](docs/microos.md) — Ignition and Combustion for immutable hosts
 - [docs/secrets.md](docs/secrets.md)
 - [docs/cloudflare.md](docs/cloudflare.md)

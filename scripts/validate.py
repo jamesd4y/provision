@@ -63,6 +63,7 @@ def schema_pass(report: Report, registry: Registry) -> None:
     service_v = validator_for("service.schema.json", registry)
     zones_v = validator_for("zones.schema.json", registry)
     tailnet_v = validator_for("tailnet.schema.json", registry)
+    backup_v = validator_for("backup.schema.json", registry)
 
     for entry in sorted(model.HOSTS_DIR.iterdir()):
         if not entry.is_dir() or entry.name.startswith("."):
@@ -87,6 +88,10 @@ def schema_pass(report: Report, registry: Registry) -> None:
     tailnet_path = model.TAILSCALE_DIR / "tailnet.yml"
     if tailnet_path.is_file():
         _check(report, tailnet_v, tailnet_path, model.read_yaml(tailnet_path))
+
+    backup_path = model.BACKUP_DIR / "config.yml"
+    if backup_path.is_file():
+        _check(report, backup_v, backup_path, model.read_yaml(backup_path))
 
 
 def _check(report: Report, validator: Draft202012Validator, path: Path, data: dict) -> None:
@@ -126,6 +131,23 @@ def cross_reference_pass(report: Report, repo: Repo) -> None:
                     rel,
                     f"tailscale tag '{tag}' is not one of the tags in tailscale/tailnet.yml "
                     f"({', '.join(sorted(known_tags))}); the OAuth client must own it",
+                )
+
+        if model.backup_plan(repo, host) and "backup" not in host.roles:
+            report.error(
+                rel,
+                "runs stacks with data worth keeping but never applies the backup "
+                "role — add 'backup' to ansible.roles",
+            )
+
+        if host.is_microos:
+            package_roles = [r for r in host.roles if r == "firewall"]
+            if package_roles:
+                report.warn(
+                    rel,
+                    "MicroOS host lists the firewall role; nftables is not installed "
+                    "there. Its firewalld policy is applied by the Ignition bootstrap "
+                    "instead — see docs/microos.md",
                 )
 
         if host.public_ssh:
@@ -216,6 +238,29 @@ def cross_reference_pass(report: Report, repo: Repo) -> None:
                 rel,
                 "declared singleton but bound on " + ", ".join(h.name for h in running),
             )
+        if service.data_dirs and not service.backup:
+            report.error(
+                rel,
+                "stores data in data_dirs but declares no x-provision.backup. "
+                "Say how it is captured, or set enabled: false with a reason",
+            )
+
+        if service.backup and not service.backup.get("enabled", True):
+            if not service.backup.get("reason"):
+                report.error(rel, "backup is disabled but gives no reason")
+
+        pre_hooks = " ".join(service.backup.get("pre", []))
+        if "$STAGING" in pre_hooks and service.backup_paths == service.data_dirs:
+            report.warn(
+                rel,
+                "writes a consistent copy into $STAGING but also captures its whole "
+                "data directory, so both end up in the snapshot. Set paths: [] if the "
+                "hook is the backup",
+            )
+
+        if service.metrics and not service.metrics.get("port"):
+            report.error(rel, "declares metrics without a port")
+
         if service.router_service not in service.compose_services:
             report.error(
                 rel,
@@ -237,6 +282,36 @@ def cross_reference_pass(report: Report, repo: Repo) -> None:
             names[name] = host.name
         if on_tailnet and not suffix:
             report.error("tailscale/tailnet.yml", "magic_dns_suffix is required once hosts join the tailnet")
+
+    # Every collector must point at a store this repo actually runs, the same
+    # rule the log pipeline has.
+    metric_stores: set[str] = set()
+    for host in repo.hosts_running("victoria-metrics"):
+        plain, _ = model.env_for(repo, host, repo.services["victoria-metrics"])
+        port = plain.get("VICTORIAMETRICS_PORT", "8428")
+        if host.on_tailnet:
+            metric_stores.add(f"{host.ansible_host}:{port}")
+        bind = plain.get("VICTORIAMETRICS_BIND", "127.0.0.1")
+        if bind == "0.0.0.0":
+            for attr in ("private_ipv4", "ipv4"):
+                if host.network.get(attr):
+                    metric_stores.add(f"{host.network[attr]}:{port}")
+        elif bind != "127.0.0.1":
+            metric_stores.add(f"{bind}:{port}")
+
+    for host in repo.hosts.values():
+        if not host.enabled or repo.binding(host, "vmagent") is None:
+            continue
+        rel = str(host.path.relative_to(model.REPO_ROOT))
+        plain, _ = model.env_for(repo, host, repo.services["vmagent"])
+        endpoint = plain.get("VICTORIAMETRICS_ENDPOINT", "")
+        target = endpoint.removeprefix("http://").removeprefix("https://")
+        if metric_stores and target not in metric_stores:
+            report.error(
+                rel,
+                f"vmagent ships to '{target}', which no host in this repo serves "
+                f"(known: {', '.join(sorted(metric_stores))})",
+            )
 
     all_domains: dict[str, str] = {}
     for host in repo.hosts.values():

@@ -59,9 +59,21 @@ def test_the_tailnet_role_runs_before_anything_that_needs_it(repo):
                 )
 
 
-def test_a_host_that_locks_down_ssh_also_runs_the_firewall_role(repo):
+def test_a_host_that_locks_down_ssh_is_firewalled_somehow(repo):
+    """Debian hosts get the nftables role. MicroOS has no nftables package and
+    ships firewalld instead, which the Ignition bootstrap configures with the
+    same policy: trust tailscale0, no public SSH."""
+    import render_ignition
+
     for host in repo.hosts.values():
-        if host.enabled and not host.public_ssh:
+        if not host.enabled or host.public_ssh:
+            continue
+        if host.is_microos:
+            script = render_ignition.bootstrap_script(host, repo.tailnet, "")
+            assert "firewall-cmd" in script, f"{host.name} configures no firewall at all"
+            assert "--remove-service=ssh" in script
+            assert "--zone=trusted --change-interface=tailscale0" in script
+        else:
             assert "firewall" in host.roles, (
                 f"{host.name} has no public SSH but never applies a ruleset"
             )

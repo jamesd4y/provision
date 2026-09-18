@@ -140,16 +140,22 @@ resource "hcloud_server" "host" {
     ipv6_enabled = each.value.ipv6_enabled
   }
 
-  user_data = templatefile("${path.module}/../templates/cloud-init.yaml.tftpl", {
-    hostname           = each.value.hostname
-    fqdn               = each.value.fqdn
-    timezone           = each.value.timezone
-    ssh_user           = each.value.ssh_user
-    provider_name      = var.provider_name
-    ssh_keys           = [for key in var.ssh_keys : key.public_key]
-    tailscale_auth_key = var.tailscale_auth_key
-    tailscale_hostname = each.value.hostname
-    tailscale_tags     = var.tailscale_tags
+  # MicroOS reads Ignition from instance userdata (platform id `hetzner`), so
+  # the delivery path is the one cloud-init already used. The placeholder is
+  # swapped for the freshly minted bootstrap key here, which keeps the key out
+  # of every generated file on disk.
+  user_data = each.value.ignition != "" ? replace(
+    each.value.ignition, "__TS_AUTH_KEY__", var.tailscale_auth_key
+    ) : templatefile("${path.module}/../templates/cloud-init.yaml.tftpl", {
+      hostname           = each.value.hostname
+      fqdn               = each.value.fqdn
+      timezone           = each.value.timezone
+      ssh_user           = each.value.ssh_user
+      provider_name      = var.provider_name
+      ssh_keys           = [for key in var.ssh_keys : key.public_key]
+      tailscale_auth_key = var.tailscale_auth_key
+      tailscale_hostname = each.value.hostname
+      tailscale_tags     = var.tailscale_tags
   })
 
   lifecycle {

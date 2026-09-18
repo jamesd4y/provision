@@ -13,6 +13,9 @@ x-provision:
   description: VictoriaLogs — the log store Vector agents ship to.
   ingress: none
   singleton: false
+  metrics:
+    port: 9428
+    path: /metrics
   optional_env:
     VICTORIALOGS_BIND: 127.0.0.1
     VICTORIALOGS_PORT: "9428"
@@ -28,6 +31,12 @@ x-provision:
     VICTORIALOGS_SYSLOG_PORT: "514"
   data_dirs:
     - data
+  backup:
+    enabled: false
+    reason: >-
+      Logs are observability, not records: they are already retained for as long
+      as they are useful, and restoring stale logs onto a running instance is
+      worse than starting empty. Raise retention instead of backing this up.
 
 services:
   victoria-logs:

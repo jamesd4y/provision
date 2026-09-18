@@ -37,6 +37,7 @@ ansible:
     - docker
     - firewall
     - node_exporter
+    - backup
 
 dns:
   zone: example.com
@@ -46,6 +47,12 @@ services:
   - name: vector
     env:
       VICTORIALOGS_ENDPOINT: http://db01.tail1a2b3c.ts.net:9428
+
+  - name: cadvisor
+
+  - name: vmagent
+    env:
+      VICTORIAMETRICS_ENDPOINT: http://db01.tail1a2b3c.ts.net:8428
 
   - name: postgres
     secrets:

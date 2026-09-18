@@ -37,6 +37,10 @@ network:
       port: "9428"
       source:
         - 10.10.0.0/16
+    - name: victoriametrics
+      port: "8428"
+      source:
+        - 10.10.0.0/16
 
 ansible:
   roles:
@@ -45,6 +49,7 @@ ansible:
     - docker
     - firewall
     - node_exporter
+    - backup
   vars:
     swap_size_mb: 4096
 
@@ -56,6 +61,20 @@ services:
   - name: vector
     env:
       VICTORIALOGS_ENDPOINT: http://db01.tail1a2b3c.ts.net:9428
+
+  - name: cadvisor
+
+  - name: vmagent
+    env:
+      VICTORIAMETRICS_ENDPOINT: http://db01.tail1a2b3c.ts.net:8428
+
+  - name: victoria-metrics
+    env:
+      # Same reasoning as the log store: db01 has no public IPv4, so every
+      # interface means the private network and the tailnet.
+      VICTORIAMETRICS_BIND: 0.0.0.0
+      VICTORIAMETRICS_RETENTION: 13months
+      VICTORIAMETRICS_MAX_DISK_BYTES: "53687091200"   # 50 GiB
 
   - name: victoria-logs
     env:

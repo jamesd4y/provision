@@ -1,0 +1,50 @@
+hostname: edge01
+fqdn: edge01.lan
+description: MicroOS edge node — immutable base, configured by Ignition at first boot.
+enabled: true
+tags:
+  - homelab
+  - microos
+
+hardware:
+  cpu: 2
+  memory: 4096
+  storage:
+    - name: root
+      size: 40
+      type: ssd
+      mount: /
+
+os:
+  # No apt, no mutable /usr. scripts/render_ignition.py generates this host's
+  # config.ign and combustion/script; the provisioning stack delivers the
+  # former through instance userdata (Ignition platform id proxmoxve).
+  distribution: microos
+  version: latest
+
+network:
+  private_ipv4: 10.20.0.40
+
+provider_options:
+  vm_id: 140
+  start_on_boot: true
+
+ansible:
+  # MicroOS hosts are configured by Ignition and Combustion. Ansible manages
+  # the service layer only — the package-installing roles skip them.
+  roles:
+    - base
+    - tailscale
+    - docker
+    - node_exporter
+
+services:
+  - name: vector
+    env:
+      VICTORIALOGS_ENDPOINT: http://db01.tail1a2b3c.ts.net:9428
+
+  - name: cadvisor
+
+  - name: vmagent
+    env:
+      VICTORIAMETRICS_ENDPOINT: http://db01.tail1a2b3c.ts.net:8428

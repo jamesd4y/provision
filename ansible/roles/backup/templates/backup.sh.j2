@@ -1,0 +1,148 @@
+#!/bin/bash
+# Managed by github.com/jamesd4y/provision — generated from the stacks this host
+# runs. Do not edit here; change services/<name>.yml x-provision.backup.
+#
+# One restic snapshot per stack, tagged with the host and stack, so a restore
+# can ask for exactly one thing. Pre hooks run first (that is where a database
+# makes itself consistent) and post hooks always run, even on failure.
+set -uo pipefail
+
+CONFIG_DIR={{ backup_config_dir }}
+STAGING_ROOT={{ backup_staging_dir }}
+
+set -a
+# shellcheck disable=SC1091
+. "${CONFIG_DIR}/environment"
+set +a
+
+failures=0
+
+log() { echo "[$(date -Is)] $*"; }
+
+run_hooks() {
+  local phase="$1"; shift
+  local stack="$1"; shift
+  local cmd
+  for cmd in "$@"; do
+    log "${stack}: ${phase} hook"
+    if ! bash -c "$cmd"; then
+      log "${stack}: ${phase} hook failed: ${cmd}"
+      return 1
+    fi
+  done
+  return 0
+}
+
+backup_stack() {
+  local stack="$1" data_root="$2" staging="$3" do_stop="$4"
+  shift 4
+  # Remaining arguments: paths, then "--" then excludes.
+  local -a paths=() excludes=()
+  local seen_sep=0 arg
+  for arg in "$@"; do
+    if [ "$arg" = "--" ]; then seen_sep=1; continue; fi
+    if [ "$seen_sep" -eq 1 ]; then excludes+=("$arg"); else paths+=("$arg"); fi
+  done
+
+  export STACK="$stack" DATA_ROOT="$data_root" STAGING="$staging"
+  install -d -m 0700 "$staging"
+
+  if [ "$do_stop" = "true" ]; then
+    log "${stack}: stopping for a consistent copy"
+    docker compose -f "/opt/stacks/${stack}/docker-compose.yml" stop || true
+  fi
+
+  local rc=0
+  if ! run_hooks pre "$stack" "${PRE[@]+"${PRE[@]}"}"; then
+    rc=1
+  fi
+
+  if [ "$rc" -eq 0 ]; then
+    # A plain counter rather than a bash array-length expansion: the dollar-
+    # brace-hash sequence opens a Jinja comment, and this file is a template.
+    local -a existing=()
+    local found=0
+    for p in "${paths[@]+"${paths[@]}"}"; do
+      if [ -e "$p" ]; then
+        existing+=("$p")
+        found=$((found + 1))
+      else
+        log "${stack}: ${p} does not exist yet, skipping"
+      fi
+    done
+
+    if [ "$found" -eq 0 ]; then
+      log "${stack}: nothing to back up"
+    else
+      local -a exclude_args=()
+      for e in "${excludes[@]+"${excludes[@]}"}"; do exclude_args+=(--exclude "$e"); done
+      log "${stack}: backing up ${existing[*]}"
+      if ! restic backup \
+          --tag "host:{{ inventory_hostname }}" \
+          --tag "stack:${stack}" \
+          --host "{{ inventory_hostname }}" \
+          "${exclude_args[@]+"${exclude_args[@]}"}" \
+          "${existing[@]}"; then
+        log "${stack}: restic backup FAILED"
+        rc=1
+      fi
+    fi
+  fi
+
+  # Always, so a failed run does not leave a dump lying around.
+  run_hooks post "$stack" "${POST[@]+"${POST[@]}"}" || log "${stack}: post hook failed"
+
+  if [ "$do_stop" = "true" ]; then
+    log "${stack}: starting again"
+    docker compose -f "/opt/stacks/${stack}/docker-compose.yml" start || true
+  fi
+
+  unset STACK DATA_ROOT STAGING
+  return "$rc"
+}
+
+{% for entry in provision_backup | default([]) %}
+# ---- {{ entry.stack }} ----
+PRE=(
+{% for cmd in entry.pre %}
+  {{ cmd | quote }}
+{% endfor %}
+)
+POST=(
+{% for cmd in entry.post %}
+  {{ cmd | quote }}
+{% endfor %}
+)
+backup_stack {{ entry.stack | quote }} {{ entry.data_root | quote }} {{ entry.staging | quote }} {{ 'true' if entry.stop else 'false' }} \
+{% for path in entry.paths %}
+  {{ path | quote }} \
+{% endfor %}
+  -- \
+{% for ex in entry.exclude %}
+  {{ ex | quote }} \
+{% endfor %}
+  || failures=$((failures + 1))
+
+{% endfor %}
+
+if [ "$failures" -gt 0 ]; then
+  log "${failures} stack(s) failed to back up"
+  exit 1
+fi
+
+log "all stacks backed up"
+
+# Retention runs after a successful backup so a broken run cannot expire the
+# snapshots that are still the good ones.
+restic forget \
+{% if backup_retention.daily is defined %}  --keep-daily {{ backup_retention.daily }} \
+{% endif %}
+{% if backup_retention.weekly is defined %}  --keep-weekly {{ backup_retention.weekly }} \
+{% endif %}
+{% if backup_retention.monthly is defined %}  --keep-monthly {{ backup_retention.monthly }} \
+{% endif %}
+{% if backup_retention.yearly is defined %}  --keep-yearly {{ backup_retention.yearly }} \
+{% endif %}
+  --group-by host,tags
+
+log "retention applied"

@@ -41,6 +41,11 @@ steps:
       # so without this there is nothing to connect to.
       - eval "$(scripts/tailscale_up.sh)"
       - eval "$(scripts/ssh_setup.sh)"
+      # The backup role writes the restic repository password onto each host.
+      # It is read here and passed through the environment, never on a command
+      # line where ps would show it.
+      - export RESTIC_PASSWORD="$(scripts/secrets.sh get backup/restic_password)"
+      - export RESTIC_SSH_KEY="$(scripts/secrets.sh get backup/truenas_ssh_key || true)"
       - |
         limit="$(cat build/limit.txt)"
         if [ -z "$limit" ]; then

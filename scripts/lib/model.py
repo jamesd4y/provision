@@ -8,6 +8,7 @@ module, so there is exactly one interpretation of the YAML.
 from __future__ import annotations
 
 import copy
+import json
 import os
 import re
 from dataclasses import dataclass, field
@@ -21,6 +22,7 @@ HOSTS_DIR = REPO_ROOT / "hosts"
 SERVICES_DIR = REPO_ROOT / "services"
 CLOUDFLARE_DIR = REPO_ROOT / "cloudflare"
 TAILSCALE_DIR = REPO_ROOT / "tailscale"
+BACKUP_DIR = REPO_ROOT / "backup"
 SCHEMA_DIR = REPO_ROOT / "schemas"
 
 
@@ -31,12 +33,13 @@ def set_root(root: Path) -> None:
     and check that validation rejects it. PROVISION_ROOT does the same thing
     from the command line, which is handy when reviewing someone else's branch.
     """
-    global REPO_ROOT, HOSTS_DIR, SERVICES_DIR, CLOUDFLARE_DIR, TAILSCALE_DIR
+    global REPO_ROOT, HOSTS_DIR, SERVICES_DIR, CLOUDFLARE_DIR, TAILSCALE_DIR, BACKUP_DIR
     REPO_ROOT = Path(root)
     HOSTS_DIR = REPO_ROOT / "hosts"
     SERVICES_DIR = REPO_ROOT / "services"
     CLOUDFLARE_DIR = REPO_ROOT / "cloudflare"
     TAILSCALE_DIR = REPO_ROOT / "tailscale"
+    BACKUP_DIR = REPO_ROOT / "backup"
     # Schemas always come from the real checkout: a test fixture describes a
     # fleet, it does not get to redefine what a valid fleet is.
 
@@ -52,11 +55,15 @@ DEFAULT_IMAGES = {
         "rocky:9": "rocky-9",
         "alma:9": "alma-9",
         "fedora:40": "fedora-40",
+        # MicroOS has no Hetzner-provided image: build a snapshot once and name
+        # it this, or set os.image per host. docs/microos.md has the steps.
+        "microos:latest": "microos-latest",
     },
     "proxmox": {
         "debian:13": "debian-13-cloudinit",
         "debian:12": "debian-12-cloudinit",
         "ubuntu:24.04": "ubuntu-24.04-cloudinit",
+        "microos:latest": "microos-latest",
     },
 }
 
@@ -183,6 +190,11 @@ class Host:
         return [d for d in (self.hardware.get("storage") or []) if d is not self.root_disk]
 
     @property
+    def is_microos(self) -> bool:
+        """MicroOS is configured at first boot by Ignition/Combustion, not by apt."""
+        return self.os.get("distribution") == "microos"
+
+    @property
     def tailscale(self) -> dict:
         return self.raw.get("tailscale", {}) or {}
 
@@ -276,6 +288,38 @@ class Service:
     def data_dirs(self) -> list[str]:
         return self.meta.get("data_dirs", []) or []
 
+    @property
+    def metrics(self) -> dict:
+        """Where this stack publishes Prometheus metrics, if it does."""
+        return self.meta.get("metrics", {}) or {}
+
+    @property
+    def wants_scrape_targets(self) -> bool:
+        return bool(self.meta.get("wants_scrape_targets", False))
+
+    @property
+    def backup(self) -> dict:
+        """How this stack is captured. Absent means nobody has decided yet,
+        which validation treats differently from deciding not to."""
+        return self.meta.get("backup", {}) or {}
+
+    @property
+    def backed_up(self) -> bool:
+        return bool(self.backup) and self.backup.get("enabled", True)
+
+    @property
+    def backup_paths(self) -> list[str]:
+        """Paths under the stack's data root.
+
+        An explicit empty list means "none of the data directory" — which is
+        what a stack that dumps itself in a pre hook wants. Only an absent key
+        falls back to data_dirs, so `paths: []` cannot silently become
+        "back up the live database after all".
+        """
+        if "paths" in self.backup:
+            return list(self.backup["paths"])
+        return list(self.data_dirs)
+
 
 @dataclass
 class Repo:
@@ -284,6 +328,7 @@ class Repo:
     services: dict[str, Service] = field(default_factory=dict)
     zones: dict = field(default_factory=dict)
     tailnet: dict = field(default_factory=dict)
+    backup: dict = field(default_factory=dict)
 
     def hosts_for_provider(self, provider: str) -> list[Host]:
         return [h for h in self.hosts.values() if h.provider.name == provider and h.enabled]
@@ -434,6 +479,58 @@ def load_zones() -> dict:
     return read_yaml(path)
 
 
+# Where a pre hook writes a dump. Backed up alongside the stack's own paths.
+BACKUP_STAGING_ROOT = "/var/lib/provision-backup"
+
+
+def load_backup() -> dict:
+    path = BACKUP_DIR / "config.yml"
+    if not path.is_file():
+        return {}
+    config = read_yaml(path)
+    return config if config.get("enabled", True) else {}
+
+
+def backup_plan(repo: "Repo", host: Host) -> list[dict]:
+    """What the backup job on one host actually does, stack by stack.
+
+    Built here rather than in the Ansible role so the same answer is available
+    to the inventory, the tests and anyone reading the repo.
+    """
+    plan = []
+    for binding in host.service_bindings:
+        service = repo.services.get(binding["name"])
+        if service is None or not service.backed_up:
+            continue
+        data_root = binding.get("volumes_root") or f"/srv/{service.name}"
+        backup = service.backup
+        staging = f"{BACKUP_STAGING_ROOT}/{service.name}"
+        paths = [f"{data_root}/{p}" for p in service.backup_paths]
+        # Whatever a pre hook produced has to be in the snapshot, or the hook
+        # was pointless.
+        if backup.get("pre"):
+            paths.append(staging)
+        plan.append(
+            {
+                "stack": service.name,
+                "data_root": data_root,
+                "staging": staging,
+                "paths": paths,
+                # Anchored to the stack's data root unless already absolute.
+                # An unanchored pattern like "**/tmp" matches any path
+                # component anywhere and can silently exclude everything.
+                "exclude": [
+                    e if e.startswith("/") else f"{data_root}/{e}"
+                    for e in backup.get("exclude", [])
+                ],
+                "pre": backup.get("pre", []),
+                "post": backup.get("post", []),
+                "stop": bool(backup.get("stop", False)),
+            }
+        )
+    return plan
+
+
 def load_tailnet() -> dict:
     path = TAILSCALE_DIR / "tailnet.yml"
     if not path.is_file():
@@ -448,6 +545,7 @@ def load_repo() -> Repo:
     zones = load_zones()
     zone_names = set((zones.get("zones") or {}).keys())
     tailnet = load_tailnet()
+    backup = load_backup()
     providers = load_providers()
     return Repo(
         providers=providers,
@@ -455,7 +553,48 @@ def load_repo() -> Repo:
         services=load_services(),
         zones=zones,
         tailnet=tailnet,
+        backup=backup,
     )
+
+
+# node_exporter is run by an Ansible role rather than a Compose stack, so it has
+# no services/*.yml to declare itself. Its port is fixed by that role.
+NODE_EXPORTER_PORT = 9100
+
+
+def scrape_targets(repo: Repo, host: Host) -> list[dict]:
+    """Everything worth scraping on one host, in Prometheus file_sd form.
+
+    Every exporter in this repo publishes to loopback, so the address is always
+    127.0.0.1 and the only question is which ports exist on this host.
+    """
+    targets: list[dict] = []
+
+    if "node_exporter" in host.roles:
+        targets.append(
+            {
+                "targets": [f"127.0.0.1:{NODE_EXPORTER_PORT}"],
+                "labels": {"job": "node", "__metrics_path__": "/metrics"},
+            }
+        )
+
+    for binding in host.service_bindings:
+        service = repo.services.get(binding["name"])
+        if service is None or not service.metrics:
+            continue
+        metrics = service.metrics
+        targets.append(
+            {
+                "targets": [f"127.0.0.1:{metrics['port']}"],
+                "labels": {
+                    "job": metrics.get("job") or service.name,
+                    "stack": service.name,
+                    "__metrics_path__": metrics.get("path", "/metrics"),
+                },
+            }
+        )
+
+    return targets
 
 
 def env_for(repo: Repo, host: Host, service: Service) -> tuple[dict[str, Any], dict[str, str]]:
@@ -472,6 +611,10 @@ def env_for(repo: Repo, host: Host, service: Service) -> tuple[dict[str, Any], d
         "TZ": (host.os or {}).get("timezone", "UTC"),
     }
     plain.update(service.optional_env)
+    if service.wants_scrape_targets:
+        # One line, because a .env value cannot span lines. Compose drops it
+        # straight into the file_sd config.
+        plain["SCRAPE_TARGETS_JSON"] = json.dumps(scrape_targets(repo, host), separators=(",", ":"))
     plain.update(binding.get("env") or {})
     domains = binding.get("domains") or []
     if domains:

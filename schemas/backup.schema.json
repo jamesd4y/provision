@@ -1,0 +1,42 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesd4y/provision/schemas/backup.schema.json",
+  "title": "Backup config (backup/config.yml)",
+  "type": "object",
+  "required": ["repository", "password", "retention"],
+  "additionalProperties": false,
+  "properties": {
+    "enabled": { "type": "boolean", "default": true },
+    "repository": {
+      "type": "object",
+      "required": ["url"],
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "description": "restic repository URL. {host} is substituted per host."
+        }
+      }
+    },
+    "password": { "type": "string", "description": "Bitwarden key for the repository password." },
+    "ssh_key": { "type": "string", "description": "Bitwarden key for an SFTP private key. Optional." },
+    "schedule": { "type": "string", "description": "systemd OnCalendar expression." },
+    "randomized_delay": { "type": "string", "default": "45m" },
+    "timeout": { "type": "string", "default": "4h" },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "daily": { "type": "integer", "minimum": 0 },
+        "weekly": { "type": "integer", "minimum": 0 },
+        "monthly": { "type": "integer", "minimum": 0 },
+        "yearly": { "type": "integer", "minimum": 0 },
+        "last": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "prune_schedule": { "type": "string" },
+    "check_schedule": { "type": "string" },
+    "check_read_data_subset": { "type": "string", "default": "5%" }
+  }
+}

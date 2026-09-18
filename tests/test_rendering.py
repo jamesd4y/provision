@@ -109,7 +109,7 @@ def test_changing_one_service_only_redeploys_the_hosts_running_it(repo):
 def test_changing_a_host_file_redeploys_all_of_its_stacks(repo):
     result = change_analysis.analyse(repo, ["hosts/hetzner/web01.yml"])
     assert {d["service"] for d in result["deployments"]} == {
-        "vector", "traefik", "gitea", "uptime-kuma",
+        "vector", "cadvisor", "vmagent", "traefik", "gitea", "uptime-kuma",
     }
     assert result["tofu_stacks"] == ["cloudflare", "hetzner"]
 
@@ -121,9 +121,12 @@ def test_changing_a_provider_config_pulls_in_its_whole_folder(repo):
 
 
 def test_changing_a_role_pulls_in_the_hosts_that_use_it(repo):
-    # Every host runs the firewall role now that the tailnet carries SSH.
+    # Every Debian host runs the firewall role now that the tailnet carries SSH.
+    # edge01 is MicroOS and is firewalled by firewalld from its Ignition
+    # bootstrap instead, so it is correctly out of scope here.
     result = change_analysis.analyse(repo, ["ansible/roles/firewall/tasks/main.yml"])
     assert set(result["hosts"]) == {"web01", "db01", "media01", "nas01"}
+    assert "edge01" not in result["hosts"]
 
     # A role only some hosts run still narrows correctly.
     only_traefik_hosts = change_analysis.analyse(repo, ["services/traefik.yml"])
@@ -133,7 +136,7 @@ def test_changing_a_role_pulls_in_the_hosts_that_use_it(repo):
 def test_touching_shared_tooling_expands_to_everything(repo):
     result = change_analysis.analyse(repo, ["scripts/deploy.sh"])
     assert result["everything"] is True
-    assert set(result["hosts"]) == {"web01", "db01", "media01", "nas01"}
+    assert set(result["hosts"]) == {"web01", "db01", "media01", "nas01", "edge01"}
 
 
 def test_baremetal_hosts_never_reach_a_provisioning_stack(repo):

@@ -16,6 +16,15 @@ x-provision:
     GITEA_SSH_PORT: "2222"
   data_dirs:
     - data
+  backup:
+    # Repositories and config. The database lives in the shared Postgres and is
+    # captured by that stack's dump, not here.
+    paths:
+      - data
+    exclude:
+      # Relative to the stack's data root, so these cannot match anything else.
+      - data/tmp
+      - data/log
   healthcheck_url: http://localhost:3000/api/healthz
 
 services:

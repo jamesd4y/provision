@@ -42,4 +42,23 @@ storage_allow_autodetect: true
 # Monitoring
 node_exporter_image: quay.io/prometheus/node-exporter:v1.8.2
 node_exporter_port: 9100
-node_exporter_bind: "{{ ansible_host }}"
+# Loopback: vmagent scrapes it from the same host, and node_exporter has no
+# authentication. (This used to be ansible_host, which became a MagicDNS name
+# when the fleet moved to the tailnet — a name the service would have had to
+# resolve before it could bind.)
+node_exporter_bind: 127.0.0.1
+
+# Backup. Values mirror backup/config.yml; the role reads the plan itself from
+# the inventory, which computes it from the stacks each host runs.
+backup_enabled: true
+backup_schedule: "*-*-* 02:30:00"
+backup_randomized_delay: 45m
+backup_timeout: 4h
+backup_retention:
+  daily: 7
+  weekly: 5
+  monthly: 12
+  yearly: 2
+backup_prune_schedule: "Sun *-*-* 05:00:00"
+backup_check_schedule: "Sun *-*-* 06:00:00"
+backup_check_read_data_subset: 5%

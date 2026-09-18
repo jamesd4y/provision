@@ -45,6 +45,24 @@ steps:
       # order, and the rule that a rendered bundle never contains a secret.
       - python3 -m pytest tests/ -q
 
+  - name: microos
+    image: *toolbox
+    commands:
+      # Render every MicroOS host and check the Ignition against the real
+      # validator. A config that fails at first boot leaves a machine that
+      # nothing can reach.
+      - python3 scripts/render_ignition.py --all
+      - |
+        found=0
+        for cfg in build/ignition/*/config.ign; do
+          [ -e "$cfg" ] || continue
+          found=1
+          echo "==> $cfg"
+          ignition-validate "$cfg"
+          bash -n "$(dirname "$cfg")/combustion/script"
+        done
+        if [ "$found" -eq 0 ]; then echo "no MicroOS hosts"; fi
+
   - name: tofu-fmt
     image: *toolbox
     commands:

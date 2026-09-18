@@ -1,0 +1,88 @@
+# The metrics collector, one per host. Scrapes everything listening on loopback
+# and remote-writes to VictoriaMetrics.
+#
+# It runs on the host network, which is what lets it reach 127.0.0.1 targets.
+# Every exporter in this repo publishes to loopback rather than to the tailnet:
+# the metrics stay on the machine until vmagent forwards them, and there is no
+# unauthenticated endpoint on any interface.
+#
+# The target list is generated per host from the stacks that host runs — see
+# x-provision.metrics on each service — so there is no service discovery to go
+# wrong, and a target that should exist and does not is a diff, not a mystery.
+x-provision:
+  description: vmagent — scrapes local exporters and ships metrics to VictoriaMetrics.
+  ingress: none
+  singleton: false
+  wants_scrape_targets: true
+  metrics:
+    port: 8429
+    path: /metrics
+  required_env:
+    - VICTORIAMETRICS_ENDPOINT
+  optional_env:
+    VMAGENT_SCRAPE_INTERVAL: 30s
+    VMAGENT_BIND: 127.0.0.1
+    VMAGENT_PORT: "8429"
+    # vmagent buffers to disk when the store is unreachable, the same way
+    # Vector does for logs. 0 means "until the disk fills".
+    VMAGENT_MAX_DISK_USAGE: 2GB
+  data_dirs:
+    - data
+  backup:
+    enabled: false
+    reason: >-
+      Nothing but vmagent's pending remote-write queue, which is meaningless
+      once restored.
+
+services:
+  vmagent:
+    image: victoriametrics/vmagent:v1.152.0
+    container_name: vmagent
+    restart: unless-stopped
+    # Host network: the exporters it scrapes are all on 127.0.0.1.
+    network_mode: host
+    command:
+      - -promscrape.config=/etc/vmagent/scrape.yml
+      - -remoteWrite.url=${VICTORIAMETRICS_ENDPOINT}/api/v1/write
+      - -remoteWrite.tmpDataPath=/vmagent-data
+      - -remoteWrite.maxDiskUsagePerURL=${VMAGENT_MAX_DISK_USAGE}
+      - -httpListenAddr=${VMAGENT_BIND}:${VMAGENT_PORT}
+      - -promscrape.suppressScrapeErrors=false
+      - -loggerTimezone=${TZ}
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - ${DATA_ROOT}/data:/vmagent-data
+    configs:
+      - source: vmagent_scrape
+        target: /etc/vmagent/scrape.yml
+      - source: vmagent_targets
+        target: /etc/vmagent/targets.json
+
+configs:
+  vmagent_scrape:
+    content: |
+      global:
+        scrape_interval: ${VMAGENT_SCRAPE_INTERVAL}
+        scrape_timeout: 10s
+        external_labels:
+          host: ${HOSTNAME}
+
+      scrape_configs:
+        # One job, fed by a file this repo generates for this host. Each entry
+        # carries its own job name and metrics path as labels.
+        - job_name: provision
+          file_sd_configs:
+            - files:
+                - /etc/vmagent/targets.json
+          relabel_configs:
+            # instance defaults to host:port, which buries which host a series
+            # came from behind a loopback address that is the same everywhere.
+            - target_label: instance
+              replacement: ${HOSTNAME}
+
+  vmagent_targets:
+    # Single-line JSON, generated from the host's own service bindings. Compose
+    # substitutes it; nothing here is hand-maintained.
+    content: |
+      ${SCRAPE_TARGETS_JSON}
