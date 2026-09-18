@@ -1,0 +1,14 @@
+[Unit]
+Description=Back up this host's service data with restic
+Documentation=https://github.com/jamesd4y/provision/blob/main/docs/backups.md
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart={{ backup_config_dir }}/backup.sh
+TimeoutStartSec={{ backup_timeout }}
+Nice=10
+IOSchedulingClass=idle
+# A backup that pegs the box is a backup someone turns off.
+CPUSchedulingPolicy=batch

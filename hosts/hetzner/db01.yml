@@ -1,0 +1,93 @@
+hostname: db01
+fqdn: db01.example.com
+description: Private Postgres for the web tier. No public ingress.
+enabled: true
+tags:
+  - prod
+  - data
+
+hardware:
+  cpu: 4
+  memory: 8192
+  storage:
+    - name: root
+      size: 40
+      mount: /
+    - name: pgdata
+      size: 200
+      type: nvme
+      mount: /srv/postgres
+      format: xfs
+
+os:
+  distribution: debian
+  version: "13"
+
+network:
+  # Private-only: no public v4 at all, reached over the Hetzner private network.
+  ipv4_enabled: false
+  ipv6_enabled: true
+  private_ipv4: 10.10.0.20
+  firewall:
+    - name: postgres
+      port: "5432"
+      source:
+        - 10.10.0.0/16
+    - name: victorialogs
+      port: "9428"
+      source:
+        - 10.10.0.0/16
+    - name: victoriametrics
+      port: "8428"
+      source:
+        - 10.10.0.0/16
+
+ansible:
+  roles:
+    - base
+    - tailscale
+    - docker
+    - firewall
+    - node_exporter
+    - backup
+  vars:
+    swap_size_mb: 4096
+
+dns:
+  zone: example.com
+  record: db01
+
+services:
+  - name: vector
+    env:
+      VICTORIALOGS_ENDPOINT: http://db01.tail1a2b3c.ts.net:9428
+
+  - name: cadvisor
+
+  - name: vmagent
+    env:
+      VICTORIAMETRICS_ENDPOINT: http://db01.tail1a2b3c.ts.net:8428
+
+  - name: victoria-metrics
+    env:
+      # Same reasoning as the log store: db01 has no public IPv4, so every
+      # interface means the private network and the tailnet.
+      VICTORIAMETRICS_BIND: 0.0.0.0
+      VICTORIAMETRICS_RETENTION: 13months
+      VICTORIAMETRICS_MAX_DISK_BYTES: "53687091200"   # 50 GiB
+
+  - name: victoria-logs
+    env:
+      # Every interface — which on this host means the Hetzner private
+      # network and the tailnet, and nothing else: db01 has ipv4_enabled
+      # false, so there is no public v4 to bind. A test enforces that pairing.
+      VICTORIALOGS_BIND: 0.0.0.0
+      VICTORIALOGS_RETENTION: 90d
+      VICTORIALOGS_MAX_DISK_BYTES: "107374182400"   # 100 GiB of the pgdata volume
+
+  - name: postgres
+    secrets:
+      POSTGRES_PASSWORD: postgres/superuser_password
+    env:
+      POSTGRES_DB: gitea
+      POSTGRES_USER: gitea

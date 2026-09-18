@@ -1,0 +1,23 @@
+---
+firewall_enabled: true
+firewall_allow_icmp: true
+firewall_log_drops: false
+
+# Rules present on every host regardless of what its file declares. SSH is
+# deliberately not here: it arrives over the tailnet, which is accepted as a
+# trusted interface below. A host that needs a public path sets
+# network.public_ssh in its own file, where a reviewer will see it.
+firewall_baseline: []
+
+# Tailscale. The interface is trusted wholesale — traffic on it is already
+# authenticated and authorised by the tailnet's own ACLs, and re-deciding that
+# in nftables would mean two policies to keep in step.
+firewall_trust_tailscale: "{{ tailscale_enabled | default(false) }}"
+firewall_tailscale_interface: tailscale0
+# Inbound UDP for direct peer connections. Without it, peers still connect via
+# a DERP relay — it works, but every packet takes a detour.
+firewall_tailscale_udp_port: "41641"
+
+# Escape hatch. Normally false; set network.public_ssh on a host to re-open 22.
+firewall_public_ssh: "{{ provision_public_ssh | default(false) }}"
+firewall_public_ssh_sources: ["0.0.0.0/0", "::/0"]

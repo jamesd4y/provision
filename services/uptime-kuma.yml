@@ -1,0 +1,48 @@
+x-provision:
+  description: Uptime Kuma status page and probe runner.
+  ingress: traefik
+  port: 3001
+  requires:
+    - traefik
+  data_dirs:
+    - data
+  backup:
+    paths:
+      - data
+    exclude:
+      # The live database is excluded in favour of the consistent copy the pre
+      # hook makes. Copying an open SQLite file can miss committed transactions
+      # still sitting in the -wal, which restores as silent data loss.
+      - data/kuma.db
+      - data/kuma.db-wal
+      - data/kuma.db-shm
+    pre:
+      - >-
+        docker exec -i uptime-kuma sh -c
+        'sqlite3 /app/data/kuma.db ".backup /app/data/kuma-backup.db"'
+    post:
+      # The copy is in the snapshot now; no need to keep it on disk too.
+      - docker exec -i uptime-kuma sh -c 'rm -f /app/data/kuma-backup.db' || true
+  healthcheck_url: http://localhost:3001/
+
+services:
+  uptime-kuma:
+    image: louislam/uptime-kuma:1
+    container_name: uptime-kuma
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ}
+    volumes:
+      - ${DATA_ROOT}/data:/app/data
+    networks:
+      - edge
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3001/"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  edge:
+    external: true

@@ -1,0 +1,20 @@
+---
+profile: basic
+
+exclude_paths:
+  - build/
+  - .venv/
+
+skip_list:
+  # Role defaults here are deliberately unprefixed: they are the knobs a host
+  # sets under `ansible.vars` in hosts/<provider>/<hostname>.yml, so
+  # `swap_size_mb: 2048` reads better than `base_swap_size_mb: 2048`, and a
+  # setting is not tied to whichever role happens to implement it today.
+  # Role-internal variables DO carry the prefix — that part of the rule is kept
+  # by convention.
+  - var-naming[no-role-prefix]
+
+  # This repo has no Galaxy metadata: the roles are local to it and are never
+  # published or consumed from anywhere else.
+  - meta-no-info
+  - meta-runtime

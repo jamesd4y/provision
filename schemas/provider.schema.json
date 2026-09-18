@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesd4y/provision/schemas/provider.schema.json",
+  "title": "Provider config (hosts/<provider>/_config.yml)",
+  "type": "object",
+  "required": [
+    "provider",
+    "kind"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "provider": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$",
+      "description": "Must equal the directory name it lives in."
+    },
+    "kind": {
+      "enum": [
+        "hetzner",
+        "proxmox",
+        "baremetal"
+      ],
+      "description": "Which OpenTofu stack provisions hosts in this folder. 'baremetal' means no provisioning \u2014 hosts already exist."
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "description": {
+      "type": "string"
+    },
+    "credentials": {
+      "type": "object",
+      "description": "Bitwarden Secrets Manager secret KEYS (not values). Resolved by scripts/secrets.sh at pipeline time.",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "endpoint": {
+      "type": "object",
+      "description": "Proxmox API endpoint. Ignored for other kinds.",
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "node": {
+          "type": "string"
+        },
+        "insecure": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "ssh_keys": {
+      "type": "array",
+      "description": "Public keys installed on every host in this folder at provision time.",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "public_key"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "public_key": {
+            "type": "string",
+            "pattern": "^(ssh-ed25519|ssh-rsa|ecdsa-sha2-) "
+          }
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "private_network": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "cidr": {
+              "type": "string"
+            },
+            "zone": {
+              "type": "string"
+            }
+          }
+        },
+        "bridge": {
+          "type": "string",
+          "description": "Proxmox bridge, e.g. vmbr0."
+        },
+        "vlan_id": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 4094
+        },
+        "gateway": {
+          "type": "string",
+          "description": "Default gateway for statically addressed VMs (Proxmox)."
+        },
+        "prefix": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 128,
+          "default": 24,
+          "description": "Netmask length applied to network.private_ipv4 (Proxmox)."
+        },
+        "nameservers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Resolvers written into cloud-init."
+        },
+        "search_domain": {
+          "type": "string"
+        },
+        "snippet_datastore": {
+          "type": "string",
+          "default": "local",
+          "description": "Proxmox datastore with the 'snippets' content type enabled, used to upload cloud-init user-data."
+        }
+      }
+    },
+    "defaults": {
+      "type": "object",
+      "description": "Merged under every host in this folder; the host file always wins.",
+      "additionalProperties": true,
+      "properties": {
+        "location": {
+          "type": "string"
+        },
+        "datastore": {
+          "type": "string"
+        },
+        "template": {
+          "type": "string"
+        },
+        "os": {
+          "$ref": "host.schema.json#/$defs/os_partial"
+        },
+        "hardware": {
+          "$ref": "host.schema.json#/$defs/hardware_partial"
+        },
+        "ansible": {
+          "$ref": "host.schema.json#/$defs/ansible"
+        },
+        "dns": {
+          "$ref": "host.schema.json#/$defs/dns"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

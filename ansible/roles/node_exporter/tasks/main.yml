@@ -1,0 +1,21 @@
+---
+# Metrics are bound to the private address by default, not 0.0.0.0: node_exporter
+# has no authentication and leaks a detailed picture of the host.
+- name: Run node_exporter
+  community.docker.docker_container:
+    name: node-exporter
+    image: "{{ node_exporter_image }}"
+    restart_policy: unless-stopped
+    pid_mode: host
+    network_mode: host
+    read_only: true
+    command:
+      - --path.rootfs=/host
+      - --web.listen-address={{ node_exporter_bind }}:{{ node_exporter_port }}
+      - --collector.systemd
+      - --collector.processes
+    volumes:
+      - /:/host:ro,rslave
+    labels:
+      managed_by: provision
+  tags: [monitoring, node-exporter]

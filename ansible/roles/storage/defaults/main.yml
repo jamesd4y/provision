@@ -1,0 +1,9 @@
+---
+# Map a declared disk name to a device path, e.g.
+#   provision_disk_devices: { data: /dev/disk/by-id/scsi-0HC_Volume_12345 }
+# The Hetzner stack prints exactly these in its `volumes` output.
+provision_disk_devices: {}
+# When no device is given, look for an unused block device of about the right
+# size. Only devices with no partitions and no filesystem are ever touched.
+storage_allow_autodetect: true
+storage_size_tolerance_pct: 10

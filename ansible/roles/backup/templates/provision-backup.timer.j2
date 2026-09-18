@@ -1,0 +1,12 @@
+[Unit]
+Description=Nightly service data backup
+
+[Timer]
+OnCalendar={{ backup_schedule }}
+# So the whole fleet does not hit the NAS at the same second.
+RandomizedDelaySec={{ backup_randomized_delay }}
+# A host that was off at 02:30 still gets backed up when it comes back.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

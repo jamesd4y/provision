@@ -1,0 +1,8 @@
+# Pinned so CI and a laptop agree. Used by everything under scripts/.
+PyYAML==6.0.2
+jsonschema==4.23.0
+referencing==0.35.1
+
+# Developer tooling (tests + linting). Not needed to run the scripts.
+pytest==8.3.4
+yamllint==1.35.1

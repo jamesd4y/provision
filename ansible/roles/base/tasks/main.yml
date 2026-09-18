@@ -1,0 +1,102 @@
+---
+- name: Check the machine matches what hosts/ says it is
+  ansible.builtin.import_tasks: assert_hardware.yml
+  when: hardware_assert | bool
+  tags: [base, assert]
+
+- name: Set hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+  tags: [base]
+
+- name: Record identity for anyone who SSHes in wondering what this box is
+  ansible.builtin.copy:
+    dest: /etc/provision-host.json
+    mode: "0644"
+    content: |
+      {
+        "hostname": "{{ inventory_hostname }}",
+        "fqdn": "{{ provision_fqdn }}",
+        "provider": "{{ provision_provider }}",
+        "kind": "{{ provision_kind }}",
+        "roles": {{ provision_roles | to_json }},
+        "services": {{ provision_services | map(attribute='name') | list | to_json }},
+        "managed_by": "github.com/jamesd4y/provision"
+      }
+  tags: [base]
+
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ provision_timezone }}"
+  notify: Restart chrony
+  tags: [base]
+
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ base_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  register: base_apt
+  retries: 3
+  delay: 10
+  until: base_apt is succeeded
+  when: not (provision_microos | default(false))
+  tags: [base]
+
+- name: Configure unattended upgrades
+  # MicroOS updates itself transactionally on its own timer; apt's equivalent
+  # does not exist there.
+  when: not (provision_microos | default(false))
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "{{ 1 if unattended_upgrades else 0 }}";
+      APT::Periodic::Unattended-Upgrade "{{ 1 if unattended_upgrades else 0 }}";
+      APT::Periodic::AutocleanInterval "7";
+  tags: [base]
+
+- name: Manage the deploy user
+  # cloud-init already did this on provisioned hosts; baremetal needs it here,
+  # and running it everywhere means one code path to reason about.
+  ansible.builtin.user:
+    name: "{{ ansible_user }}"
+    groups: sudo
+    append: true
+    shell: /bin/bash
+    create_home: true
+  tags: [base]
+
+- name: Allow the deploy user passwordless sudo
+  ansible.builtin.copy:
+    dest: "/etc/sudoers.d/90-{{ ansible_user }}"
+    mode: "0440"
+    validate: visudo -cf %s
+    content: "{{ ansible_user }} ALL=(ALL) NOPASSWD:ALL\n"
+  tags: [base]
+
+- name: Harden sshd
+  ansible.builtin.template:
+    src: sshd.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-provision.conf
+    mode: "0644"
+    validate: sshd -t -f %s
+  when: manage_sshd | bool
+  notify: Restart sshd
+  tags: [base, ssh]
+
+- name: Manage swap
+  ansible.builtin.import_tasks: swap.yml
+  when: swap_size_mb | int > 0
+  tags: [base, swap]
+
+- name: Create declared mount points
+  ansible.builtin.file:
+    path: "{{ item.mount }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ provision_storage | selectattr('mount', 'defined') | rejectattr('mount', 'equalto', '/') | list }}"
+  loop_control:
+    label: "{{ item.mount }}"
+  tags: [base]

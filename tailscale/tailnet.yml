@@ -1,0 +1,30 @@
+# The tailnet this fleet lives on.
+#
+# Access policy (ACLs, tag owners, grants) is deliberately NOT here — it stays
+# in the Tailscale admin console. docs/tailscale.md lists the exact policy this
+# repo needs so the console and the repo agree.
+#
+# Both credentials are Bitwarden Secrets Manager KEYS, never values.
+
+# Your tailnet name, as shown on the admin console's General page.
+tailnet: example.com
+
+# MagicDNS suffix. Every host is reachable at <hostname>.<suffix>, and that is
+# what Ansible and deploy.sh connect to once a host has joined.
+magic_dns_suffix: tail1a2b3c.ts.net
+
+# OAuth client with the auth_keys scope, owning the tags below.
+# scripts/tailscale_authkey.sh exchanges these for short-lived auth keys.
+oauth_client_id: tailscale/oauth_client_id
+oauth_client_secret: tailscale/oauth_client_secret
+
+tags:
+  # Applied to every host in hosts/. Long-lived, non-ephemeral.
+  server: tag:server
+  # Applied to the Woodpecker runner. Ephemeral: the node removes itself when
+  # the pipeline step ends, so the tailnet does not fill with dead CI machines.
+  ci: tag:ci
+
+# How long a bootstrap auth key stays valid. It only has to survive one
+# provisioning run, so keep it short.
+authkey_expiry_seconds: 3600

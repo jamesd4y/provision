@@ -1,0 +1,121 @@
+---
+- name: Refuse to configure backups without a repository password
+  # A restic repository initialised with an empty password is not encrypted in
+  # any useful sense, and you would not find out until you needed it.
+  ansible.builtin.assert:
+    that:
+      - backup_password | length > 0
+      - backup_repository | length > 0
+    fail_msg: >-
+      {{ inventory_hostname }}: backup needs RESTIC_PASSWORD in the environment
+      and a repository URL. The pipeline exports it from Bitwarden; locally run
+      `export RESTIC_PASSWORD=$(scripts/secrets.sh get backup/restic_password)`.
+    success_msg: "backing up to {{ backup_repository }}"
+  when: backup_enabled | bool
+  tags: [backup]
+
+- name: Install restic
+  ansible.builtin.apt:
+    name: restic
+    state: present
+  when:
+    - backup_enabled | bool
+    - not (provision_microos | default(false))
+  tags: [backup]
+
+- name: Create the backup directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+  loop:
+    - "{{ backup_config_dir }}"
+    - "{{ backup_staging_dir }}"
+  when: backup_enabled | bool
+  tags: [backup]
+
+- name: Write the repository credentials
+  # 0600, root-owned, and never echoed: the backup script sources this rather
+  # than taking the password on a command line where ps would show it.
+  ansible.builtin.template:
+    src: environment.j2
+    dest: "{{ backup_config_dir }}/environment"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when: backup_enabled | bool
+  tags: [backup]
+
+- name: Write the SFTP identity
+  ansible.builtin.copy:
+    content: "{{ backup_ssh_key }}\n"
+    dest: "{{ backup_config_dir }}/id_backup"
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  when:
+    - backup_enabled | bool
+    - backup_ssh_key | length > 0
+  tags: [backup]
+
+- name: Write the backup script
+  ansible.builtin.template:
+    src: backup.sh.j2
+    dest: "{{ backup_config_dir }}/backup.sh"
+    owner: root
+    group: root
+    mode: "0700"
+    validate: bash -n %s
+  when: backup_enabled | bool
+  tags: [backup]
+
+- name: Install the systemd units
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - provision-backup.service
+    - provision-backup.timer
+    - provision-backup-prune.service
+    - provision-backup-prune.timer
+    - provision-backup-check.service
+    - provision-backup-check.timer
+  notify: Reload systemd
+  when: backup_enabled | bool
+  tags: [backup]
+
+- name: Initialise the repository if it is new
+  # `restic init` on an existing repository is a no-op that exits non-zero, so
+  # check first rather than ignoring errors and missing a real failure.
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      set -a; . {{ backup_config_dir }}/environment; set +a
+      if restic cat config >/dev/null 2>&1; then
+        echo "exists"
+      else
+        restic init >&2
+        echo "created"
+      fi
+  register: backup_init
+  changed_when: "'created' in backup_init.stdout"
+  when: backup_enabled | bool
+  tags: [backup]
+
+- name: Enable the timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop:
+    - provision-backup.timer
+    - provision-backup-prune.timer
+    - provision-backup-check.timer
+  when: backup_enabled | bool
+  tags: [backup]

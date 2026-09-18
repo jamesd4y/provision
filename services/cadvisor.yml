@@ -1,0 +1,47 @@
+# Per-container CPU, memory, network and disk. node_exporter covers the host;
+# this covers what is running on it.
+#
+# cAdvisor is deliberately bound to loopback: its endpoint enumerates every
+# container, image and mount on the host, which is a useful map for an attacker
+# and of no use to anyone off the machine. vmagent scrapes it locally.
+x-provision:
+  description: cAdvisor — per-container metrics for vmagent to scrape.
+  ingress: none
+  singleton: false
+  metrics:
+    port: 8081
+    path: /metrics
+  optional_env:
+    CADVISOR_BIND: 127.0.0.1
+    CADVISOR_PORT: "8081"
+    CADVISOR_HOUSEKEEPING: 30s
+
+services:
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.55.1
+    container_name: cadvisor
+    restart: unless-stopped
+    privileged: true          # needs it to read cgroup and device state
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    command:
+      - --housekeeping_interval=${CADVISOR_HOUSEKEEPING}
+      - --docker_only=true
+      - --store_container_labels=false
+      # Keep only the labels this repo actually groups by. Without this every
+      # compose label becomes a metric label and the series count explodes.
+      - --whitelisted_container_labels=com.docker.compose.project,com.docker.compose.service
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    ports:
+      - "${CADVISOR_BIND}:${CADVISOR_PORT}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://127.0.0.1:8080/healthz"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

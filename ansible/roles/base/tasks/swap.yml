@@ -1,0 +1,36 @@
+---
+- name: Create the swap file
+  ansible.builtin.command:
+    cmd: "fallocate -l {{ swap_size_mb }}M /swapfile"
+    creates: /swapfile
+
+- name: Lock down the swap file
+  ansible.builtin.file:
+    path: /swapfile
+    owner: root
+    group: root
+    mode: "0600"
+
+- name: Check whether it is already formatted
+  ansible.builtin.command: file -b /swapfile
+  register: base_swap_type
+  changed_when: false
+
+- name: Format the swap file
+  ansible.builtin.command: mkswap /swapfile
+  when: "'swap file' not in base_swap_type.stdout"
+  changed_when: true
+
+- name: Enable swap at boot
+  ansible.posix.mount:
+    src: /swapfile
+    path: none
+    fstype: swap
+    opts: sw
+    state: present
+
+- name: Enable swap now
+  ansible.builtin.command: swapon /swapfile
+  when: ansible_swaptotal_mb | int == 0
+  changed_when: true
+  failed_when: false

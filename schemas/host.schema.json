@@ -1,0 +1,585 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesd4y/provision/schemas/host.schema.json",
+  "title": "Host (hosts/<provider>/<hostname>.yml)",
+  "type": "object",
+  "required": [
+    "hostname",
+    "hardware",
+    "os"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "hostname": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$",
+      "description": "Must equal the filename without .yml."
+    },
+    "fqdn": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "hardware": {
+      "$ref": "#/$defs/hardware"
+    },
+    "os": {
+      "$ref": "#/$defs/os"
+    },
+    "network": {
+      "$ref": "#/$defs/network"
+    },
+    "provider_options": {
+      "type": "object",
+      "description": "Escape hatch for provider-specific knobs (hetzner server_type, proxmox vm_id, ...). Prefer hardware/os where possible.",
+      "additionalProperties": true,
+      "properties": {
+        "server_type": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "vm_id": {
+          "type": "integer"
+        },
+        "node": {
+          "type": "string"
+        },
+        "template": {
+          "type": "string"
+        },
+        "datastore": {
+          "type": "string"
+        },
+        "start_on_boot": {
+          "type": "boolean"
+        },
+        "backups": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ansible": {
+      "$ref": "#/$defs/ansible"
+    },
+    "services": {
+      "type": "array",
+      "description": "The host declares what runs on it. Each entry names a stack in services/.",
+      "items": {
+        "$ref": "#/$defs/service_binding"
+      }
+    },
+    "dns": {
+      "$ref": "#/$defs/dns"
+    },
+    "tailscale": {
+      "$ref": "#/$defs/tailscale"
+    }
+  },
+  "$defs": {
+    "hardware": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cpu",
+        "memory"
+      ],
+      "properties": {
+        "cpu": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256,
+          "description": "vCPU cores."
+        },
+        "memory": {
+          "type": "integer",
+          "minimum": 512,
+          "description": "RAM in MiB."
+        },
+        "architecture": {
+          "enum": [
+            "x86",
+            "arm"
+          ],
+          "default": "x86"
+        },
+        "storage": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "size"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "GiB."
+              },
+              "type": {
+                "enum": [
+                  "ssd",
+                  "nvme",
+                  "hdd",
+                  "network"
+                ],
+                "default": "ssd"
+              },
+              "mount": {
+                "type": "string",
+                "description": "Absolute mount path. Omit or '/' for the root disk."
+              },
+              "format": {
+                "enum": [
+                  "ext4",
+                  "xfs",
+                  "btrfs",
+                  "none"
+                ],
+                "default": "ext4"
+              }
+            }
+          }
+        }
+      }
+    },
+    "os": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "distribution",
+        "version"
+      ],
+      "properties": {
+        "distribution": {
+          "enum": [
+            "debian",
+            "ubuntu",
+            "rocky",
+            "alma",
+            "fedora",
+            "microos"
+          ]
+        },
+        "version": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string",
+          "description": "Provider image/template id. Defaulted from distribution+version when omitted."
+        },
+        "timezone": {
+          "type": "string",
+          "default": "UTC"
+        }
+      }
+    },
+    "network": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ipv4": {
+          "type": "string",
+          "description": "Public v4. Required for baremetal; filled in from tofu outputs for cloud hosts."
+        },
+        "ipv6": {
+          "type": "string"
+        },
+        "private_ipv4": {
+          "type": "string"
+        },
+        "ipv4_enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "ipv6_enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "firewall": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "port"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "port": {
+                "type": "string",
+                "pattern": "^[0-9]+(-[0-9]+)?$"
+              },
+              "protocol": {
+                "enum": [
+                  "tcp",
+                  "udp"
+                ],
+                "default": "tcp"
+              },
+              "source": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [
+                  "0.0.0.0/0",
+                  "::/0"
+                ],
+                "description": "CIDRs. Applied both at the cloud firewall (where supported) and in nftables via the firewall role."
+              }
+            }
+          }
+        },
+        "public_ssh": {
+          "type": "boolean",
+          "default": false,
+          "description": "Re-open port 22 to the world. Only for a host not on the tailnet, or during recovery."
+        }
+      }
+    },
+    "ansible": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "user": {
+          "type": "string",
+          "default": "deploy"
+        },
+        "port": {
+          "type": "integer",
+          "default": 22
+        },
+        "python": {
+          "type": "string",
+          "default": "/usr/bin/python3"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Roles applied in order. 'base' and 'docker' are implied by any host carrying services."
+        },
+        "vars": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "service_binding": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "Matches services/<name>.yml."
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "domains": {
+          "type": "array",
+          "description": "Public hostnames. Drives Cloudflare DNS and the Traefik router rule.",
+          "items": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "object",
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false,
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "zone": {
+                    "type": "string"
+                  },
+                  "proxied": {
+                    "type": "boolean",
+                    "default": true
+                  },
+                  "record": {
+                    "enum": [
+                      "A",
+                      "AAAA",
+                      "CNAME"
+                    ],
+                    "default": "A"
+                  },
+                  "port": {
+                    "type": "integer",
+                    "description": "Container port Traefik forwards to. Defaults to the stack's declared port."
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "env": {
+          "type": "object",
+          "description": "Plain (non-secret) values written into the stack's .env on the host.",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          }
+        },
+        "secrets": {
+          "type": "object",
+          "description": "ENV_VAR -> Bitwarden Secrets Manager secret key. Values are fetched in CI and never stored here.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "volumes_root": {
+          "type": "string",
+          "description": "Override the host path stack data lives under. Default /srv/<name>."
+        }
+      }
+    },
+    "dns": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "zone": {
+          "type": "string",
+          "description": "Cloudflare zone this host's records live in."
+        },
+        "record": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Name of the host's own A/AAAA record, e.g. 'web01'. Null disables it."
+        },
+        "proxied": {
+          "type": "boolean",
+          "default": false,
+          "description": "Host records are normally grey-clouded so SSH/ACME keep working."
+        },
+        "extra_records": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "type",
+              "value"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "enum": [
+                  "A",
+                  "AAAA",
+                  "CNAME",
+                  "TXT",
+                  "MX",
+                  "SRV",
+                  "CAA",
+                  "NS"
+                ]
+              },
+              "value": {
+                "type": "string"
+              },
+              "zone": {
+                "type": "string"
+              },
+              "ttl": {
+                "type": "integer",
+                "default": 1
+              },
+              "priority": {
+                "type": "integer"
+              },
+              "proxied": {
+                "type": "boolean",
+                "default": false
+              },
+              "comment": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "hardware_partial": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cpu": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 256,
+          "description": "vCPU cores."
+        },
+        "memory": {
+          "type": "integer",
+          "minimum": 512,
+          "description": "RAM in MiB."
+        },
+        "architecture": {
+          "enum": [
+            "x86",
+            "arm"
+          ],
+          "default": "x86"
+        },
+        "storage": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "size"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "GiB."
+              },
+              "type": {
+                "enum": [
+                  "ssd",
+                  "nvme",
+                  "hdd",
+                  "network"
+                ],
+                "default": "ssd"
+              },
+              "mount": {
+                "type": "string",
+                "description": "Absolute mount path. Omit or '/' for the root disk."
+              },
+              "format": {
+                "enum": [
+                  "ext4",
+                  "xfs",
+                  "btrfs",
+                  "none"
+                ],
+                "default": "ext4"
+              }
+            }
+          }
+        }
+      },
+      "description": "Partial hardware block for provider defaults; no keys are required."
+    },
+    "os_partial": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "distribution": {
+          "enum": [
+            "debian",
+            "ubuntu",
+            "rocky",
+            "alma",
+            "fedora",
+            "microos"
+          ]
+        },
+        "version": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string",
+          "description": "Provider image/template id. Defaulted from distribution+version when omitted."
+        },
+        "timezone": {
+          "type": "string",
+          "default": "UTC"
+        }
+      },
+      "description": "Partial os block for provider defaults; no keys are required."
+    },
+    "tailscale": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Tailnet membership. A host that joins is reachable at <hostname>.<magic_dns_suffix> and needs no public SSH.",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "hostname": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$",
+          "description": "Name on the tailnet. Defaults to the host's own hostname."
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^tag:[a-z0-9-]+$"
+          },
+          "description": "Defaults to the server tag from tailscale/tailnet.yml."
+        },
+        "accept_dns": {
+          "type": "boolean",
+          "default": true
+        },
+        "accept_routes": {
+          "type": "boolean",
+          "default": false
+        },
+        "ssh": {
+          "type": "boolean",
+          "default": false,
+          "description": "Let tailscaled terminate SSH and authorise by tailnet identity. Off here: this fleet keeps sshd and uses the tailnet only as the transport."
+        },
+        "extra_args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Passed verbatim to `tailscale up`."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,41 @@
+# Hetzner Cloud. Hosts in this folder are created and destroyed by tofu/hetzner.
+provider: hetzner
+kind: hetzner
+enabled: true
+description: Hetzner Cloud VPS fleet.
+
+# Bitwarden Secrets Manager keys — never the values themselves.
+credentials:
+  hcloud_token: hetzner/api_token
+
+ssh_keys:
+  - name: woodpecker-ci
+    public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEcikeyREPLACEmeWITHyourCIkey ci@provision
+  - name: james
+    public_key: ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFAKEadminKEYreplaceMEwithYOURkey james@workstation
+
+network:
+  private_network:
+    name: prod
+    cidr: 10.10.0.0/16
+    zone: eu-central
+
+# Every host in this folder starts from these and overrides what it needs.
+defaults:
+  location: nbg1
+  os:
+    distribution: debian
+    version: "13"
+    timezone: Europe/London
+  hardware:
+    architecture: x86
+  ansible:
+    user: deploy
+    port: 22
+  tailscale:
+    enabled: true
+  dns:
+    zone: example.com
+    proxied: false
+  tags:
+    - cloud

@@ -1,0 +1,15 @@
+---
+docker_edge_network: edge
+docker_stacks_root: /opt/stacks
+docker_prune_schedule: weekly
+docker_daemon_extra: {}
+
+# Logging. The default keeps logs local and lets the Vector stack ship them,
+# which is what services/vector.yml exists for — see docs/logging.md before
+# changing this to a remote driver.
+docker_log_driver: json-file
+docker_log_max_size: 20m
+docker_log_max_file: "5"
+# Merged over the driver's defaults. For a remote driver this is where its
+# options go, e.g. syslog-address / syslog-format / mode / max-buffer-size.
+docker_log_opts: {}

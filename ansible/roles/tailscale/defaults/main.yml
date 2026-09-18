@@ -1,0 +1,18 @@
+---
+# Set from the host's `tailscale:` block by the inventory; these are the
+# fallbacks when a host says nothing.
+tailscale_enabled: true
+tailscale_node_name: "{{ inventory_hostname }}"
+tailscale_tags: [tag:server]
+tailscale_accept_dns: true
+tailscale_accept_routes: false
+tailscale_ssh: false
+tailscale_extra_args: []
+
+# Bootstrap credential. The pipeline mints a short-lived, tagged, pre-authorised
+# key with scripts/tailscale_authkey.sh and passes it in; it is only used when a
+# host is not already registered, so steady-state runs need no credential at all.
+tailscale_auth_key: ""
+
+# How long to wait for the node to come up before calling it a failure.
+tailscale_up_timeout: 60

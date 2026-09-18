@@ -1,0 +1,50 @@
+# Where backups go and how long they are kept.
+#
+# restic, because you asked for deduplication: it chunks content and stores each
+# chunk once, so a 40 GiB Postgres dump taken nightly costs roughly what changed
+# rather than 40 GiB a night. It also encrypts client-side, which matters when
+# the destination is a NAS that other things can read.
+#
+# Do NOT enable ZFS deduplication on the TrueNAS dataset holding this. restic
+# has already deduplicated the data, ZFS dedup would find almost nothing to
+# match, and it would cost you RAM permanently. Compression on the dataset is
+# fine and still helps a little.
+
+enabled: true
+
+repository:
+  # {host} is substituted per host, so each machine gets its own repository.
+  # Separate repos mean one host cannot read or corrupt another's history, and
+  # a restore never has to filter someone else's data. They also deduplicate
+  # independently — shared chunks across hosts are not pooled, which is the
+  # price of that isolation.
+  #
+  # SFTP needs nothing installed on TrueNAS beyond an SSH user. For an
+  # append-only destination that a compromised host cannot rewrite, run
+  # rest-server on TrueNAS and switch this to rest:https://truenas:8000/{host}/
+  url: "sftp:restic@truenas.tail1a2b3c.ts.net:/mnt/tank/restic/{host}"
+
+# Bitwarden keys, never values. The repository password is the only thing
+# standing between the NAS and your data — losing it loses every backup, so
+# store it somewhere you will still have if the fleet is gone.
+password: backup/restic_password
+# Private key for the SFTP user, if the destination needs one beyond the
+# host's own deploy key. Leave empty to use the host's SSH identity.
+ssh_key: backup/truenas_ssh_key
+
+schedule: "*-*-* 02:30:00"      # systemd OnCalendar
+randomized_delay: 45m           # so the whole fleet does not hit the NAS at once
+timeout: 4h
+
+retention:
+  daily: 7
+  weekly: 5
+  monthly: 12
+  yearly: 2
+
+# Pruning rewrites the repository and must not overlap a backup.
+prune_schedule: "Sun *-*-* 05:00:00"
+# `restic check --read-data-subset` actually reads data back and verifies it.
+# A backup you have never read is a hope, not a backup.
+check_schedule: "Sun *-*-* 06:00:00"
+check_read_data_subset: 5%

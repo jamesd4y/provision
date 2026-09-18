@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesd4y/provision/schemas/service.schema.json",
+  "title": "Service stack (services/<name>.yml)",
+  "description": "A real Docker Compose file. The x-provision block is a Compose extension field \u2014 Compose ignores it, this repo reads it.",
+  "type": "object",
+  "required": [
+    "services",
+    "x-provision"
+  ],
+  "properties": {
+    "services": {
+      "type": "object",
+      "minProperties": 1
+    },
+    "networks": {
+      "type": "object"
+    },
+    "volumes": {
+      "type": "object"
+    },
+    "configs": {
+      "type": "object"
+    },
+    "secrets": {
+      "type": "object"
+    },
+    "x-provision": {
+      "type": "object",
+      "required": [
+        "description"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "port": {
+          "type": "integer",
+          "description": "Container port Traefik routes to when a host binds a domain without its own port."
+        },
+        "router_service": {
+          "type": "string",
+          "description": "Which compose service Traefik labels attach to. Defaults to the single service, or the one named like the stack."
+        },
+        "ingress": {
+          "enum": [
+            "traefik",
+            "host-port",
+            "none"
+          ],
+          "default": "traefik",
+          "description": "traefik: labels are generated. host-port: the stack publishes its own ports. none: internal only."
+        },
+        "required_env": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Env vars the stack will not start without. Validation fails if no host supplies them via env/secrets."
+        },
+        "optional_env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": [
+              "string",
+              "number",
+              "boolean"
+            ]
+          },
+          "description": "Defaults written into .env when the host does not override them."
+        },
+        "data_dirs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Directories created (root-owned, 0750) under the stack's volume root before compose up."
+        },
+        "singleton": {
+          "type": "boolean",
+          "default": false,
+          "description": "Fail validation if more than one host binds this stack."
+        },
+        "requires": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Other stacks that must be bound on the same host (e.g. traefik). Deployed first."
+        },
+        "healthcheck_url": {
+          "type": "string",
+          "description": "Fetched from the host after deploy to confirm the rollout. Relative to the container, e.g. http://localhost:3000/healthz."
+        },
+        "stop_grace": {
+          "type": "string",
+          "default": "30s"
+        },
+        "metrics": {
+          "type": "object",
+          "required": [
+            "port"
+          ],
+          "additionalProperties": false,
+          "description": "This stack publishes Prometheus metrics on 127.0.0.1:<port>. vmagent on the same host scrapes it; nothing else can reach it.",
+          "properties": {
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "path": {
+              "type": "string",
+              "default": "/metrics"
+            },
+            "job": {
+              "type": "string",
+              "description": "Job label. Defaults to the stack name."
+            }
+          }
+        },
+        "wants_scrape_targets": {
+          "type": "boolean",
+          "default": false,
+          "description": "Inject SCRAPE_TARGETS_JSON, the generated list of everything worth scraping on this host. Only vmagent needs it."
+        },
+        "backup": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "How this stack's data is captured. A stack with data_dirs must declare this, even if only to say it is not backed up.",
+          "properties": {
+            "enabled": {
+              "type": "boolean",
+              "default": true
+            },
+            "reason": {
+              "type": "string",
+              "description": "Required when enabled is false \u2014 why this data does not need backing up."
+            },
+            "paths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Paths under the stack's data root. Defaults to data_dirs."
+            },
+            "exclude": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "pre": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Shell commands run before the snapshot, with STACK, DATA_ROOT and STAGING exported. Where a database makes itself consistent."
+            },
+            "post": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Cleanup, run whether or not the backup succeeded."
+            },
+            "stop": {
+              "type": "boolean",
+              "default": false,
+              "description": "Stop the stack for the duration. Correct but an outage; prefer a pre hook."
+            }
+          }
+        }
+      }
+    }
+  }
+}

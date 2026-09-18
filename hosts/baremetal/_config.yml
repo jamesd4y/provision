@@ -1,0 +1,24 @@
+# Machines that already exist: a NUC, a rented dedicated server, a Pi.
+# Nothing here is provisioned — OpenTofu skips this folder entirely.
+# The files are inventory: Ansible configures them and Woodpecker deploys to them,
+# and CI checks that the declared hardware matches what the box actually reports.
+provider: baremetal
+kind: baremetal
+enabled: true
+description: Pre-existing hardware, described but not created.
+
+defaults:
+  os:
+    distribution: debian
+    version: "13"
+    timezone: Europe/London
+  ansible:
+    user: deploy
+    port: 22
+  tailscale:
+    enabled: true
+  dns:
+    zone: example.com
+    proxied: false
+  tags:
+    - baremetal

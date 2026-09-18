@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesd4y/provision/schemas/zones.schema.json",
+  "title": "Cloudflare zones (cloudflare/zones.yml)",
+  "type": "object",
+  "required": ["account_id", "zones"],
+  "additionalProperties": false,
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "description": "Bitwarden Secrets Manager key holding the Cloudflare account id, or the literal id."
+    },
+    "api_token": {
+      "type": "string",
+      "description": "Bitwarden Secrets Manager key for a token with Zone:DNS:Edit on these zones."
+    },
+    "defaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ttl": { "type": "integer", "default": 1 },
+        "proxied": { "type": "boolean", "default": true },
+        "comment_prefix": { "type": "string", "default": "managed-by:provision" }
+      }
+    },
+    "zones": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "Zone name -> settings.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["zone_id"],
+        "additionalProperties": false,
+        "properties": {
+          "zone_id": { "type": "string" },
+          "enabled": { "type": "boolean", "default": true },
+          "default_proxied": { "type": "boolean" },
+          "records": {
+            "type": "array",
+            "description": "Zone-level records not tied to a host (MX, TXT, verification, apex CNAME...).",
+            "items": {
+              "type": "object",
+              "required": ["name", "type", "value"],
+              "additionalProperties": false,
+              "properties": {
+                "name": { "type": "string" },
+                "type": { "enum": ["A", "AAAA", "CNAME", "TXT", "MX", "SRV", "CAA", "NS"] },
+                "value": { "type": "string" },
+                "ttl": { "type": "integer" },
+                "priority": { "type": "integer" },
+                "proxied": { "type": "boolean" },
+                "comment": { "type": "string" }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
