@@ -94,6 +94,19 @@ variable "endpoint" {
   type        = any
 }
 
+variable "tailscale_auth_key" {
+  description = "Short-lived, tagged, pre-authorised Tailscale auth key, minted per apply by scripts/tailscale_authkey.sh. Empty disables first-boot registration."
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "tailscale_tags" {
+  description = "Tags applied to hosts at first boot. Must be tags the OAuth client owns."
+  type        = string
+  default     = "tag:server"
+}
+
 variable "_banner" {
   description = "Provenance note written by the renderer."
   type        = string

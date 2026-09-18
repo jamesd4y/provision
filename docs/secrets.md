@@ -47,9 +47,16 @@ names. Change the left column and the right column follows.
 | `cloudflare/acme_dns_token` | `services/traefik.yml` | DNS:Edit, for the ACME DNS-01 challenge |
 | `tofu/state_url` | `scripts/tofu.sh` | base URL of the HTTP state backend |
 | `tofu/state_username`, `tofu/state_password` | `scripts/tofu.sh` | state backend credentials |
+| `tailscale/oauth_client_id` | `scripts/tailscale_authkey.sh` | OAuth client with the `auth_keys` scope |
+| `tailscale/oauth_client_secret` | same | its secret; mints every short-lived auth key |
 | `ssh/ci_private_key` | `scripts/ssh_setup.sh` | the deploy identity |
 | `ssh/known_hosts` | `scripts/ssh_setup.sh` | pinned host keys (optional, recommended) |
 | `<service>/<name>` | host bindings | whatever a stack needs |
+
+The Tailscale OAuth client is the credential that can add machines to your
+tailnet, so scope it to `tag:provision` and nothing else — it then mints keys
+only for `tag:server` and `tag:ci`. It never reaches a host: hosts receive a
+minted key that expires in an hour. See [tailscale.md](tailscale.md).
 
 Use two ACME/DNS tokens rather than one: the Traefik token lives on every edge
 host and only needs `DNS:Edit`, while the OpenTofu token lives only in CI. A
@@ -96,6 +103,12 @@ the Woodpecker UI, or a log — `secrets.sh check` prints key names and nothing
 else, and OpenTofu's credential variables are all marked `sensitive`.
 
 ## The SSH identity
+
+Note what the deploy key is now, and is not. Hosts have no public SSH, so
+holding this key is not on its own enough to reach anything — you also have to
+be on the tailnet, which is a separate credential and a separate ACL decision.
+That is two independent things to compromise rather than one.
+
 
 `scripts/ssh_setup.sh` writes the CI key from `ssh/ci_private_key` into the
 ephemeral container at mode 0600 and exports the env vars Ansible and

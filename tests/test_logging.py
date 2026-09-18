@@ -54,10 +54,20 @@ def test_every_collector_has_an_endpoint_to_ship_to(repo):
 
 def test_collectors_ship_to_a_store_this_repo_actually_runs(repo):
     """Catch an endpoint pointing at a host that no longer runs VictoriaLogs."""
-    stores = set()
+    # Endpoints are MagicDNS names now, so map every address a store answers on
+    # back to the host serving it.
+    stores: dict[str, str] = {}
     for host in repo.hosts_running("victoria-logs"):
         plain, _ = model.env_for(repo, host, repo.services["victoria-logs"])
-        stores.add(f"{plain['VICTORIALOGS_BIND']}:{plain['VICTORIALOGS_PORT']}")
+        port = plain["VICTORIALOGS_PORT"]
+        if host.on_tailnet:
+            stores[f"{host.ansible_host}:{port}"] = host.name
+        bind = plain["VICTORIALOGS_BIND"]
+        if bind not in ("0.0.0.0", "::", "127.0.0.1"):
+            stores[f"{bind}:{port}"] = host.name
+        for attr in ("private_ipv4", "ipv4"):
+            if bind == "0.0.0.0" and host.network.get(attr):
+                stores[f"{host.network[attr]}:{port}"] = host.name
 
     for host in repo.hosts.values():
         if not host.enabled or repo.binding(host, "vector") is None:
@@ -70,6 +80,17 @@ def test_collectors_ship_to_a_store_this_repo_actually_runs(repo):
         )
 
 
+def test_one_store_serves_the_whole_fleet(repo):
+    """Two stores means two places to look; the tailnet removed the reason for it."""
+    endpoints = set()
+    for host in repo.hosts.values():
+        if not host.enabled or repo.binding(host, "vector") is None:
+            continue
+        plain, _ = model.env_for(repo, host, repo.services["vector"])
+        endpoints.add(plain["VICTORIALOGS_ENDPOINT"])
+    assert len(endpoints) == 1, f"collectors are split across {sorted(endpoints)}"
+
+
 def test_the_log_store_is_never_published_by_accident(repo):
     """VictoriaLogs has no authentication, so a domain binding must not slip in."""
     service = repo.services["victoria-logs"]
@@ -79,23 +100,37 @@ def test_the_log_store_is_never_published_by_accident(repo):
         assert not binding.get("domains"), f"{host.name} publishes the log store"
 
 
-def test_the_log_store_never_binds_to_every_interface(repo):
+def test_the_log_store_is_never_bound_where_the_public_internet_can_reach_it(repo):
+    """0.0.0.0 is allowed only where there is no public v4 to bind to.
+
+    db01 has ipv4_enabled: false, so every interface means the Hetzner private
+    network and the tailnet. Enabling public IPv4 on such a host would silently
+    publish an unauthenticated log store, so pair the two here.
+    """
     for host in repo.hosts_running("victoria-logs"):
         plain, _ = model.env_for(repo, host, repo.services["victoria-logs"])
-        assert plain["VICTORIALOGS_BIND"] not in ("0.0.0.0", "::", ""), (
-            f"{host.name} exposes an unauthenticated log store on every interface"
-        )
+        bind = plain["VICTORIALOGS_BIND"]
+        assert bind != "", f"{host.name} has an empty bind address"
+        if bind in ("0.0.0.0", "::"):
+            assert host.network.get("ipv4_enabled") is False, (
+                f"{host.name} binds the log store to {bind} while having a public "
+                f"IPv4 — that publishes an unauthenticated log store"
+            )
 
 
-def test_a_host_serving_the_log_store_opens_the_port_to_its_private_network(repo):
+def test_a_host_serving_the_log_store_keeps_it_off_the_public_internet(repo):
+    """Reachable over the tailnet, or via a rule scoped to a private network —
+    never by a rule open to the world."""
     for host in repo.hosts_running("victoria-logs"):
         plain, _ = model.env_for(repo, host, repo.services["victoria-logs"])
         port = plain["VICTORIALOGS_PORT"]
         rules = [r for r in host.network.get("firewall", []) if r["port"] == port]
-        assert rules, f"{host.name} serves {port} but has no firewall rule for it"
+        assert host.on_tailnet or rules, (
+            f"{host.name} serves {port} but is not on the tailnet and has no firewall rule"
+        )
         for rule in rules:
-            for cidr in rule.get("source", []):
-                assert not cidr.startswith("0.0.0.0"), (
+            for cidr in rule.get("source", ["0.0.0.0/0"]):
+                assert not cidr.startswith(("0.0.0.0", "::/0")), (
                     f"{host.name} opens the log store to the internet"
                 )
 

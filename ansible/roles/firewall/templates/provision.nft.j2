@@ -16,13 +16,35 @@ table inet filter {
     ip6 nexthdr ipv6-icmp accept
 {% endif %}
 
+{% if firewall_trust_tailscale | bool %}
+    # The tailnet is the trusted path in. Traffic arriving on this interface has
+    # already been authenticated by tailscaled and authorised by the tailnet ACL,
+    # so SSH, the log store and anything else internal ride it without a rule
+    # per service here.
+    iifname "{{ firewall_tailscale_interface }}" accept
+
+    # Let peers reach us directly instead of relaying through DERP.
+    udp dport {{ firewall_tailscale_udp_port }} accept
+{% endif %}
+
+{% if firewall_public_ssh | bool %}
+    # network.public_ssh is set on this host — a public way in exists.
+{%   for cidr in firewall_public_ssh_sources %}
+{%     if ':' in cidr %}
+    ip6 saddr {{ cidr }} tcp dport 22 accept
+{%     else %}
+    ip saddr {{ cidr }} tcp dport 22 accept
+{%     endif %}
+{%   endfor %}
+{% endif %}
+
 {% for rule in (firewall_baseline + provision_firewall) %}
     # {{ rule.name }}
 {%   for cidr in (rule.source | default(['0.0.0.0/0', '::/0'])) %}
 {%     if ':' in cidr %}
-    ip6 saddr {{ cidr }} {{ rule.protocol | default('tcp') }} dport {{ rule.port | replace('-', '-') }} accept
+    ip6 saddr {{ cidr }} {{ rule.protocol | default('tcp') }} dport {{ rule.port }} accept
 {%     else %}
-    ip saddr {{ cidr }} {{ rule.protocol | default('tcp') }} dport {{ rule.port | replace('-', '-') }} accept
+    ip saddr {{ cidr }} {{ rule.protocol | default('tcp') }} dport {{ rule.port }} accept
 {%     endif %}
 {%   endfor %}
 {% endfor %}

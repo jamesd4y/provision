@@ -17,8 +17,20 @@ ENV DEBIAN_FRONTEND=noninteractive \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates curl gnupg git jq unzip rsync openssh-client \
+      netcat-openbsd \
       python3 python3-pip python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+# Tailscale, so a pipeline step can join the tailnet and reach hosts that have
+# no public SSH. netcat-openbsd above is what carries SSH through the SOCKS
+# proxy when the runner has no TUN device.
+RUN curl -fsSL https://pkgs.tailscale.com/stable/debian/trixie.noarmor.gpg \
+      -o /usr/share/keyrings/tailscale-archive-keyring.gpg \
+    && echo "deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/debian trixie main" \
+      > /etc/apt/sources.list.d/tailscale.list \
+    && apt-get update && apt-get install -y --no-install-recommends tailscale \
+    && rm -rf /var/lib/apt/lists/* \
+    && tailscale version
 
 # OpenTofu
 RUN curl -fsSL "https://github.com/opentofu/opentofu/releases/download/v${TOFU_VERSION}/tofu_${TOFU_VERSION}_linux_${TARGETARCH}.zip" -o /tmp/tofu.zip \

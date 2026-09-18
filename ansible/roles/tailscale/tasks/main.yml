@@ -1,0 +1,136 @@
+---
+# Joining the tailnet is the first thing that happens to a host, because it is
+# how everything afterwards is reached — including the SSH session that runs the
+# firewall role and closes the public path.
+- name: Ensure the apt keyring directory exists
+  ansible.builtin.file:
+    path: /usr/share/keyrings
+    state: directory
+    mode: "0755"
+  tags: [tailscale]
+
+- name: Install the Tailscale apt keyring
+  ansible.builtin.get_url:
+    url: >-
+      https://pkgs.tailscale.com/stable/{{ ansible_distribution | lower }}/{{
+      ansible_distribution_release }}.noarmor.gpg
+    dest: /usr/share/keyrings/tailscale-archive-keyring.gpg
+    mode: "0644"
+    force: false
+  tags: [tailscale]
+
+- name: Add the Tailscale repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg]
+      https://pkgs.tailscale.com/stable/{{ ansible_distribution | lower }}
+      {{ ansible_distribution_release }} main
+    filename: tailscale
+    state: present
+  tags: [tailscale]
+
+- name: Install tailscale
+  ansible.builtin.apt:
+    name: tailscale
+    state: present
+    update_cache: true
+  register: tailscale_apt
+  retries: 3
+  delay: 10
+  until: tailscale_apt is succeeded
+  tags: [tailscale]
+
+- name: Start tailscaled
+  ansible.builtin.service:
+    name: tailscaled
+    state: started
+    enabled: true
+  tags: [tailscale]
+
+- name: Read the current tailnet state
+  ansible.builtin.command: tailscale status --json
+  register: tailscale_state
+  changed_when: false
+  failed_when: false
+  tags: [tailscale]
+
+- name: Decide whether this host still needs to register
+  ansible.builtin.set_fact:
+    tailscale_backend: >-
+      {{ (tailscale_state.stdout | from_json).BackendState | default('Unknown')
+         if tailscale_state.rc == 0 and tailscale_state.stdout else 'Unknown' }}
+  tags: [tailscale]
+
+- name: Refuse to register without a key rather than half-configuring the host
+  ansible.builtin.fail:
+    msg: >-
+      {{ inventory_hostname }} is not on the tailnet (state: {{ tailscale_backend }})
+      and no auth key was supplied. Run the provision pipeline, or mint one by hand
+      with scripts/tailscale_authkey.sh and pass -e tailscale_auth_key=...
+      See docs/tailscale.md.
+  when:
+    - tailscale_backend != 'Running'
+    - tailscale_auth_key | length == 0
+  tags: [tailscale]
+
+- name: Join the tailnet
+  # Only when not already registered: `tailscale up` with a key is not free, and
+  # re-running it on a healthy node churns the device record.
+  ansible.builtin.command:
+    argv: "{{ _tailscale_up_argv }}"
+  vars:
+    _tailscale_up_argv: >-
+      {{ ['tailscale', 'up',
+          '--auth-key=' ~ tailscale_auth_key ~ '?ephemeral=false&preauthorized=true',
+          '--hostname=' ~ tailscale_node_name,
+          '--advertise-tags=' ~ (tailscale_tags | join(',')),
+          '--accept-dns=' ~ (tailscale_accept_dns | ternary('true', 'false')),
+          '--accept-routes=' ~ (tailscale_accept_routes | ternary('true', 'false')),
+          '--timeout=' ~ tailscale_up_timeout ~ 's']
+         + (tailscale_ssh | ternary(['--ssh'], []))
+         + tailscale_extra_args }}
+  when: tailscale_backend != 'Running'
+  changed_when: true
+  no_log: true          # the auth key is on this command line
+  tags: [tailscale]
+
+- name: Apply settings that can change without re-registering
+  # `tailscale set` is idempotent and needs no credential, so flipping accept-dns
+  # on an existing node does not require a new key.
+  ansible.builtin.command:
+    argv:
+      - tailscale
+      - set
+      - "--hostname={{ tailscale_node_name }}"
+      - "--accept-dns={{ tailscale_accept_dns | ternary('true', 'false') }}"
+      - "--accept-routes={{ tailscale_accept_routes | ternary('true', 'false') }}"
+      - "--ssh={{ tailscale_ssh | ternary('true', 'false') }}"
+  changed_when: false
+  tags: [tailscale]
+
+- name: Confirm the host is actually on the tailnet
+  ansible.builtin.command: tailscale status --json
+  register: tailscale_final
+  changed_when: false
+  retries: 6
+  delay: 5
+  until:
+    - tailscale_final.rc == 0
+    - (tailscale_final.stdout | from_json).BackendState == 'Running'
+    - ((tailscale_final.stdout | from_json).Self.TailscaleIPs | default([])) | length > 0
+  tags: [tailscale]
+
+- name: Record the tailnet address
+  vars:
+    _self: "{{ (tailscale_final.stdout | from_json).Self }}"
+  ansible.builtin.set_fact:
+    tailscale_ipv4: "{{ _self.TailscaleIPs | first }}"
+    tailscale_dns_name: "{{ _self.DNSName | default('') | regex_replace('\\.$', '') }}"
+  tags: [tailscale]
+
+- name: Report where this host lives on the tailnet
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }} is {{ tailscale_dns_name or tailscale_node_name }}
+      at {{ tailscale_ipv4 }}
+  tags: [tailscale]

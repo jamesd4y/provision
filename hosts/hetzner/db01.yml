@@ -29,10 +29,6 @@ network:
   ipv6_enabled: true
   private_ipv4: 10.10.0.20
   firewall:
-    - name: ssh
-      port: "22"
-      source:
-        - 10.10.0.0/16
     - name: postgres
       port: "5432"
       source:
@@ -45,6 +41,7 @@ network:
 ansible:
   roles:
     - base
+    - tailscale
     - docker
     - firewall
     - node_exporter
@@ -58,13 +55,14 @@ dns:
 services:
   - name: vector
     env:
-      VICTORIALOGS_ENDPOINT: http://10.10.0.20:9428
+      VICTORIALOGS_ENDPOINT: http://db01.tail1a2b3c.ts.net:9428
 
   - name: victoria-logs
     env:
-      # Reachable from the Hetzner private network only; the firewall rule
-      # above is what keeps it there.
-      VICTORIALOGS_BIND: 10.10.0.20
+      # Every interface — which on this host means the Hetzner private
+      # network and the tailnet, and nothing else: db01 has ipv4_enabled
+      # false, so there is no public v4 to bind. A test enforces that pairing.
+      VICTORIALOGS_BIND: 0.0.0.0
       VICTORIALOGS_RETENTION: 90d
       VICTORIALOGS_MAX_DISK_BYTES: "107374182400"   # 100 GiB of the pgdata volume
 

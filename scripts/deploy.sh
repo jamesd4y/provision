@@ -30,6 +30,12 @@ SSH_OPTS=(
 if [[ -n "${SSH_IDENTITY_FILE:-}" ]]; then
   SSH_OPTS+=(-i "${SSH_IDENTITY_FILE}" -o IdentitiesOnly=yes)
 fi
+# scripts/tailscale_up.sh exports this when the runner joined the tailnet in
+# userspace mode: there is no route to 100.x, so SSH goes through its SOCKS
+# proxy, which also resolves the MagicDNS name.
+if [[ -n "${SSH_PROXY_COMMAND:-}" ]]; then
+  SSH_OPTS+=(-o "ProxyCommand=${SSH_PROXY_COMMAND}")
+fi
 
 die() { echo "deploy: $*" >&2; exit 1; }
 log() { echo "==> $*"; }

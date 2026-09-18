@@ -29,11 +29,6 @@ os:
 network:
   ipv6_enabled: true
   firewall:
-    - name: ssh
-      port: "22"
-      protocol: tcp
-      source:
-        - 10.10.0.0/16
     - name: http
       port: "80"
       protocol: tcp
@@ -44,7 +39,10 @@ network:
 ansible:
   user: deploy
   roles:
+    # Before docker and firewall: the tailnet is how everything else is reached,
+    # including the SSH session applying the rules that close the public path.
     - base
+    - tailscale
     - docker
     - firewall
     - node_exporter
@@ -66,7 +64,7 @@ services:
   # Listed first so it is deployed first and captures the other stacks starting.
   - name: vector
     env:
-      VICTORIALOGS_ENDPOINT: http://10.10.0.20:9428
+      VICTORIALOGS_ENDPOINT: http://db01.tail1a2b3c.ts.net:9428
 
   - name: traefik
     secrets:

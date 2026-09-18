@@ -26,11 +26,6 @@ os:
 
 network:
   private_ipv4: 10.20.0.30
-  firewall:
-    - name: ssh
-      port: "22"
-      source:
-        - 10.20.0.0/24
 
 provider_options:
   vm_id: 130
@@ -40,7 +35,9 @@ provider_options:
 ansible:
   roles:
     - base
+    - tailscale
     - docker
+    - firewall
     - node_exporter
   vars:
     swap_size_mb: 2048
@@ -52,7 +49,7 @@ dns:
 services:
   - name: vector
     env:
-      VICTORIALOGS_ENDPOINT: http://10.20.0.10:9428
+      VICTORIALOGS_ENDPOINT: http://db01.tail1a2b3c.ts.net:9428
 
   - name: traefik
     secrets:

@@ -52,6 +52,6 @@ class Fleet:
 
 @pytest.fixture
 def fleet(tmp_path):
-    for name in ("hosts", "services", "cloudflare"):
+    for name in ("hosts", "services", "cloudflare", "tailscale"):
         shutil.copytree(REPO_ROOT / name, tmp_path / name)
     return Fleet(tmp_path)

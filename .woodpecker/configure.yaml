@@ -37,6 +37,9 @@ steps:
     environment: *bws_env
     commands:
       - scripts/refresh_host_ips.sh
+      # The runner joins as an ephemeral tag:ci node. Hosts have no public SSH,
+      # so without this there is nothing to connect to.
+      - eval "$(scripts/tailscale_up.sh)"
       - eval "$(scripts/ssh_setup.sh)"
       - |
         limit="$(cat build/limit.txt)"

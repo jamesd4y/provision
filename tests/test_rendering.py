@@ -121,8 +121,13 @@ def test_changing_a_provider_config_pulls_in_its_whole_folder(repo):
 
 
 def test_changing_a_role_pulls_in_the_hosts_that_use_it(repo):
+    # Every host runs the firewall role now that the tailnet carries SSH.
     result = change_analysis.analyse(repo, ["ansible/roles/firewall/tasks/main.yml"])
-    assert set(result["hosts"]) == {"web01", "db01"}
+    assert set(result["hosts"]) == {"web01", "db01", "media01", "nas01"}
+
+    # A role only some hosts run still narrows correctly.
+    only_traefik_hosts = change_analysis.analyse(repo, ["services/traefik.yml"])
+    assert set(only_traefik_hosts["hosts"]) == {"web01", "media01"}
 
 
 def test_touching_shared_tooling_expands_to_everything(repo):

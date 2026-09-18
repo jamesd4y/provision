@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jamesd4y/provision/schemas/tailnet.schema.json",
+  "title": "Tailnet config (tailscale/tailnet.yml)",
+  "type": "object",
+  "required": ["tailnet", "magic_dns_suffix", "oauth_client_id", "oauth_client_secret", "tags"],
+  "additionalProperties": false,
+  "properties": {
+    "tailnet": { "type": "string", "minLength": 1 },
+    "enabled": { "type": "boolean", "default": true },
+    "magic_dns_suffix": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+\\.ts\\.net$",
+      "description": "e.g. tail1a2b3c.ts.net — hosts are reachable at <hostname>.<suffix>."
+    },
+    "oauth_client_id": { "type": "string" },
+    "oauth_client_secret": { "type": "string" },
+    "authkey_expiry_seconds": {
+      "type": "integer",
+      "minimum": 300,
+      "maximum": 7776000,
+      "default": 3600
+    },
+    "tags": {
+      "type": "object",
+      "required": ["server", "ci"],
+      "additionalProperties": false,
+      "properties": {
+        "server": { "type": "string", "pattern": "^tag:[a-z0-9-]+$" },
+        "ci": { "type": "string", "pattern": "^tag:[a-z0-9-]+$" }
+      }
+    }
+  }
+}

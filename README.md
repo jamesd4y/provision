@@ -11,6 +11,7 @@ hosts/<provider>/_config.yml     how to talk to a provider, and its defaults
 hosts/<provider>/<hostname>.yml  one machine: cpu, memory, storage, os, services
 services/<name>.yml              one Docker Compose stack, portable across hosts
 cloudflare/zones.yml             the DNS zones this repo is allowed to touch
+tailscale/tailnet.yml            the tailnet every host joins
 ```
 
 ## How a change reaches production
@@ -42,7 +43,8 @@ that one stack on the hosts that run it, not the fleet. See
 | Host setup | Ansible over SSH | `ansible/` |
 | Containers | Docker Compose pushed over SSH | `services/`, `scripts/deploy.sh` |
 | DNS | OpenTofu (Cloudflare) | `tofu/cloudflare/` |
-| Logs | Vector → VictoriaLogs, one store per site | `services/vector.yml` |
+| Network | Tailscale mesh; no host has public SSH | `ansible/roles/tailscale/` |
+| Logs | Vector → VictoriaLogs, one store for the fleet | `services/vector.yml` |
 | Secrets | Bitwarden Secrets Manager | `scripts/secrets.sh` |
 
 Why these and not the alternatives: [docs/alternatives.md](docs/alternatives.md).
@@ -68,7 +70,7 @@ os:
   version: "13"
 
 ansible:
-  roles: [base, docker, firewall, node_exporter]
+  roles: [base, tailscale, docker, firewall, node_exporter]
 
 services:            # the host declares what runs on it
   - name: traefik
@@ -144,6 +146,7 @@ environment you can also drive a single host by hand:
 ```bash
 export BWS_ACCESS_TOKEN=...            # Bitwarden machine account
 scripts/tofu.sh hetzner hetzner plan   # one stack, one provider folder
+eval "$(scripts/tailscale_up.sh)"      # join the tailnet, as CI does
 scripts/deploy.sh web01 gitea          # one stack, one host
 cd ansible && ansible-playbook site.yml --limit web01 --check --diff
 ```
@@ -155,6 +158,7 @@ cd ansible && ansible-playbook site.yml --limit web01 --check --diff
 - [docs/adding-a-host.md](docs/adding-a-host.md)
 - [docs/adding-a-service.md](docs/adding-a-service.md)
 - [docs/provisioning.md](docs/provisioning.md) — Hetzner, Proxmox templates, adopting a baremetal box
+- [docs/tailscale.md](docs/tailscale.md) — how hosts are reached, and what to do if you get locked out
 - [docs/logging.md](docs/logging.md) — where container logs go, and why not via Docker's log driver
 - [docs/secrets.md](docs/secrets.md)
 - [docs/cloudflare.md](docs/cloudflare.md)

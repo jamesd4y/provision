@@ -32,6 +32,8 @@ defaults:
   ansible:
     user: deploy
     port: 22
+  tailscale:
+    enabled: true
   dns:
     zone: example.com
     proxied: false

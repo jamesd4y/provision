@@ -75,8 +75,9 @@ steps:
       - |
         pattern='BEGIN [A-Z ]*PRIVATE KEY'
         pattern="$pattern|bws_[A-Za-z0-9]{20,}"
+        pattern="$pattern|tskey-(auth|client|api)-[A-Za-z0-9]{6,}"
         pattern="$pattern|[A-Za-z0-9_-]{40,}\.[A-Za-z0-9_-]{6,}"
-        if git grep -nIE "$pattern" -- hosts services cloudflare ansible scripts; then
+        if git grep -nIE "$pattern" -- hosts services cloudflare tailscale ansible scripts; then
           echo "looks like a credential was committed - see the matches above" >&2
           exit 1
         fi

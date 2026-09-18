@@ -30,8 +30,8 @@ scope, then calls a script from `scripts/` that also runs on a laptop.
 | `plan` | PR | `tofu plan` for every stack the diff reaches; posts it as a PR comment |
 | `provision` | push to default, manual | `tofu apply` per affected provider folder, then reports addresses |
 | `dns` | push to default, manual | renders and applies the Cloudflare stack |
-| `configure` | push to default, manual, cron | `ansible-playbook site.yml --limit <changed hosts>` |
-| `deploy` | push to default, manual, cron | checks secrets resolve, then `deploy.sh` per host |
+| `configure` | push to default, manual, cron | joins the tailnet, then `ansible-playbook site.yml --limit <changed hosts>` |
+| `deploy` | push to default, manual, cron | checks secrets resolve, joins the tailnet, then `deploy.sh` per host |
 | `drift` | cron `drift`, manual | read-only: `plan -detailed-exitcode` and `ansible --check --diff` |
 | `image` | push touching `ci/`, manual | rebuilds the toolbox image every other workflow runs in |
 
@@ -55,6 +55,25 @@ python3 scripts/changed.py --base origin/main | jq
 ```
 
 A baremetal host never reaches a provisioning stage, however it changed.
+
+## Reaching the hosts
+
+No host has a public SSH rule, so any step that touches one joins the tailnet
+first:
+
+```bash
+eval "$(scripts/tailscale_up.sh)"      # ephemeral tag:ci node
+eval "$(scripts/ssh_setup.sh)"         # the deploy key
+```
+
+The runner registers as an **ephemeral** node and disappears from the tailnet
+shortly after the step ends. In an unprivileged container there is no TUN
+device, so tailscaled runs in userspace mode with a SOCKS5 proxy, and
+`tailscale_up.sh` exports the `ProxyCommand` that `deploy.sh` and Ansible pick
+up. Both are transparent — nothing else in the pipeline changes.
+
+The CI auth key is minted per run from the OAuth client, so there is no
+Tailscale secret in Woodpecker. [tailscale.md](tailscale.md) has the detail.
 
 ## Secrets the pipelines need
 
@@ -132,6 +151,10 @@ pipeline, it will surprise you the same way here.
   `python3 -m pytest tests/ -q`. Nothing was touched.
 - **plan** shows a *replace* — you changed something immutable on an existing
   host. Read the plan before merging.
+- **configure/deploy** cannot reach a host — check the runner actually joined
+  (`tailscale_up: on the tailnet as ...` in the step log) and that the host is
+  registered. A host that never completed first-boot registration has no way in;
+  see [tailscale.md](tailscale.md#if-you-get-locked-out).
 - **provision** fails a `precondition` — the error names the file and the field.
   `prevent_destroy` firing means a host file was deleted; see
   [adding-a-host.md](adding-a-host.md#taking-a-host-out-of-service).

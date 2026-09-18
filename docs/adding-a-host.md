@@ -37,11 +37,11 @@ os:
 
 network:
   firewall:
-    - { name: ssh, port: "22", source: [10.10.0.0/16] }
+    # No SSH rule: the tailnet carries it. Only genuinely public ports go here.
     - { name: https, port: "443" }
 
 ansible:
-  roles: [base, docker, firewall, node_exporter]
+  roles: [base, tailscale, docker, firewall, node_exporter]
   vars:
     swap_size_mb: 2048
 
@@ -89,7 +89,15 @@ Baremetal hosts **must** carry `network.ipv4` (or a resolvable `fqdn`): nothing
 can discover a machine it did not create.
 
 `firewall` rules are applied twice: at the cloud firewall, where supported, and
-by the `firewall` role in nftables. Note that neither filters *published
+by the `firewall` role in nftables.
+
+**There is no SSH rule.** Hosts join the tailnet (provider defaults set
+`tailscale.enabled: true`) and nftables trusts the `tailscale0` interface
+wholesale, so SSH arrives over the tailnet and port 22 is closed everywhere
+else. The UDP 41641 rule that lets peers connect directly is derived
+automatically for any host on the tailnet — you do not write it. Validation
+rejects a host that is on neither the tailnet nor `network.public_ssh`, because
+nothing would be able to reach it. See [tailscale.md](tailscale.md). Note that neither filters *published
 container ports* — Docker DNATs those before nftables sees them. Bind a
 container port to a private address (as `services/postgres.yml` does) when it
 should not be public.

@@ -38,15 +38,37 @@ VAR_FILE="${STACK_DIR}/vars/${WORKSPACE}.tfvars.json"
 
 # Credentials the stack itself needs, as TF_VAR_* env vars. Each is looked up
 # only for the stack that declares it, so a DNS run never holds a cloud token.
+# A host with no public SSH has exactly one way in, and it has to exist before
+# anything can reach the machine — so a provisioning run carries a short-lived
+# Tailscale key for cloud-init to register with. Existing hosts ignore changes
+# to user_data, so re-minting does not churn the fleet.
+mint_tailscale_key() {
+  local tailnet_file="${REPO_ROOT}/tailscale/tailnet.yml"
+  [[ -f "$tailnet_file" ]] || return 0
+  case "${1:-}" in
+    plan | apply) ;;
+    *) return 0 ;;
+  esac
+  TF_VAR_tailscale_auth_key="$("${REPO_ROOT}/scripts/tailscale_authkey.sh")"
+  TF_VAR_tailscale_tags="$(python3 -c "
+import yaml
+config = yaml.safe_load(open('${tailnet_file}'))
+print((config.get('tags') or {}).get('server') or 'tag:server')
+")"
+  export TF_VAR_tailscale_auth_key TF_VAR_tailscale_tags
+}
+
 case "$STACK" in
   hetzner)
     TF_VAR_hcloud_token="$("$SECRETS" get "${HCLOUD_TOKEN_KEY:-hetzner/api_token}")"
     export TF_VAR_hcloud_token
+    mint_tailscale_key "${1:-}"
     ;;
   proxmox)
     TF_VAR_proxmox_api_token="$("$SECRETS" get "${PROXMOX_TOKEN_KEY:-proxmox/${WORKSPACE}_api_token}")"
     TF_VAR_proxmox_ssh_password="$("$SECRETS" get "${PROXMOX_SSH_PASSWORD_KEY:-proxmox/${WORKSPACE}_root_password}")"
     export TF_VAR_proxmox_api_token TF_VAR_proxmox_ssh_password
+    mint_tailscale_key "${1:-}"
     ;;
   cloudflare)
     TF_VAR_cloudflare_api_token="$("$SECRETS" get "${CLOUDFLARE_TOKEN_KEY:-cloudflare/dns_api_token}")"

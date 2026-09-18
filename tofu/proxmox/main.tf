@@ -67,13 +67,22 @@ resource "proxmox_virtual_environment_file" "cloud_init" {
   source_raw {
     file_name = "${each.key}-user-data.yaml"
     data = templatefile("${path.module}/../templates/cloud-init.yaml.tftpl", {
-      hostname      = each.value.hostname
-      fqdn          = each.value.fqdn
-      timezone      = each.value.timezone
-      ssh_user      = each.value.ssh_user
-      provider_name = var.provider_name
-      ssh_keys      = [for key in var.ssh_keys : key.public_key]
+      hostname           = each.value.hostname
+      fqdn               = each.value.fqdn
+      timezone           = each.value.timezone
+      ssh_user           = each.value.ssh_user
+      provider_name      = var.provider_name
+      ssh_keys           = [for key in var.ssh_keys : key.public_key]
+      tailscale_auth_key = var.tailscale_auth_key
+      tailscale_hostname = each.value.hostname
+      tailscale_tags     = var.tailscale_tags
     })
+  }
+
+  lifecycle {
+    # The snippet is read once, at first boot. Re-rendering it with a fresh
+    # bootstrap key must not churn the file or disturb the VM that points at it.
+    ignore_changes = [source_raw]
   }
 }
 

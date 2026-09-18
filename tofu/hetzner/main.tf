@@ -141,15 +141,25 @@ resource "hcloud_server" "host" {
   }
 
   user_data = templatefile("${path.module}/../templates/cloud-init.yaml.tftpl", {
-    hostname      = each.value.hostname
-    fqdn          = each.value.fqdn
-    timezone      = each.value.timezone
-    ssh_user      = each.value.ssh_user
-    provider_name = var.provider_name
-    ssh_keys      = [for key in var.ssh_keys : key.public_key]
+    hostname           = each.value.hostname
+    fqdn               = each.value.fqdn
+    timezone           = each.value.timezone
+    ssh_user           = each.value.ssh_user
+    provider_name      = var.provider_name
+    ssh_keys           = [for key in var.ssh_keys : key.public_key]
+    tailscale_auth_key = var.tailscale_auth_key
+    tailscale_hostname = each.value.hostname
+    tailscale_tags     = var.tailscale_tags
   })
 
   lifecycle {
+    # cloud-init only ever runs at first boot, so its content is irrelevant to a
+    # host that already exists — but hcloud marks user_data and ssh_keys as
+    # ForceNew. Without this, a per-apply Tailscale bootstrap key (or an added
+    # admin key) would silently destroy and recreate the whole fleet. Ansible
+    # owns both of these from here on.
+    ignore_changes = [user_data, ssh_keys]
+
     precondition {
       condition     = local.server_type[each.key] != "NO-MATCHING-SERVER-TYPE"
       error_message = "No Hetzner server type has >= ${each.value.cpu} vCPU and >= ${each.value.memory_mb} MiB (${each.value.architecture}). Lower hardware.cpu/memory or set provider_options.server_type in hosts/${var.provider_name}/${each.key}.yml."

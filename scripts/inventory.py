@@ -45,6 +45,9 @@ def hostvars(repo: Repo, host: Host) -> dict:
             }
         )
 
+    tailscale = host.tailscale
+    default_tags = [((repo.tailnet.get("tags") or {}).get("server") or "tag:server")]
+
     return {
         "ansible_host": host.ansible_host,
         "ansible_user": host.ansible.get("user", "deploy"),
@@ -63,6 +66,16 @@ def hostvars(repo: Repo, host: Host) -> dict:
         "provision_declared_memory_mb": host.hardware.get("memory"),
         "provision_storage": host.hardware.get("storage", []),
         "provision_firewall": host.network.get("firewall", []),
+        "provision_public_ssh": host.public_ssh,
+        # Tailscale. The role reads these; the firewall role uses the enabled
+        # flag to decide whether the tailnet counts as a trusted interface.
+        "tailscale_enabled": host.on_tailnet,
+        "tailscale_node_name": host.tailscale_hostname,
+        "tailscale_tags": tailscale.get("tags") or default_tags,
+        "tailscale_accept_dns": tailscale.get("accept_dns", True),
+        "tailscale_accept_routes": tailscale.get("accept_routes", False),
+        "tailscale_ssh": tailscale.get("ssh", False),
+        "tailscale_extra_args": tailscale.get("extra_args", []),
         "provision_timezone": host.os.get("timezone", "UTC"),
         "provision_os": host.os,
         **(host.ansible.get("vars") or {}),

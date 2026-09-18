@@ -146,8 +146,18 @@ discover a machine it did not create.
    echo 'deploy ALL=(ALL) NOPASSWD:ALL' | sudo tee /etc/sudoers.d/90-deploy
    ```
 
-3. Write `hosts/baremetal/<hostname>.yml` describing what the machine really is.
-4. Check the description before merging:
+3. Install Tailscale and join the tailnet — baremetal has no cloud-init, so
+   this is the one manual step:
+
+   ```bash
+   curl -fsSL https://tailscale.com/install.sh | sh
+   sudo tailscale up --advertise-tags=tag:server --hostname=<hostname>
+   ```
+
+   Use a key from `scripts/tailscale_authkey.sh` for an unattended join.
+
+4. Write `hosts/baremetal/<hostname>.yml` describing what the machine really is.
+5. Check the description before merging:
 
    ```bash
    cd ansible && ansible-playbook site.yml --limit <hostname> --check --diff
@@ -157,6 +167,31 @@ discover a machine it did not create.
 
 Use `format: none` on any disk holding a pre-existing filesystem — a ZFS pool,
 an encrypted volume, someone's data. The `storage` role skips those entirely.
+
+## First boot and the tailnet
+
+A host has no public SSH rule, so there is a real bootstrapping problem: nothing
+can reach a new machine to install Tailscale on it. cloud-init solves it.
+
+`scripts/tofu.sh` mints a reusable, pre-authorised `tag:server` auth key that
+expires in an hour, and passes it to the stack as `tailscale_auth_key`. The
+cloud-init template installs Tailscale and runs `tailscale up` in `runcmd`, so
+the machine is on the tailnet before anything needs to talk to it. By the time
+the configure stage runs, `web01.tail1a2b3c.ts.net` resolves.
+
+Two consequences worth knowing:
+
+- **A fresh key every run must not churn the fleet.** hcloud treats `user_data`
+  as ForceNew, so re-rendering cloud-init would otherwise destroy and recreate
+  every server. Both stacks therefore set `ignore_changes` on the cloud-init
+  input — correct regardless of Tailscale, since cloud-init only ever runs at
+  first boot and Ansible owns the host from then on.
+- **The key is readable where user data is readable** — the Hetzner API, or the
+  snippet file on the Proxmox node — until it expires. That is why it is a
+  minted, tag-scoped, short-lived key rather than the OAuth client secret.
+
+If first-boot registration fails, the machine exists and is unreachable. Recover
+through the provider console: [tailscale.md](tailscale.md#if-you-get-locked-out).
 
 ## Adding a provider folder
 

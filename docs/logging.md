@@ -14,7 +14,7 @@ each line, and ships it.
   vector (per host)       docker_logs source -> enrich -> disk buffer
         │                 host / stack / service attached to every line
         ▼
-  victoria-logs           one per site, private, LogsQL over HTTP
+  victoria-logs           one for the fleet, tailnet-only, LogsQL over HTTP
 ```
 
 ## Why not just point Docker's log driver at VictoriaLogs
@@ -105,23 +105,20 @@ if that set changes.
 
 ```bash
 # everything from one host in the last 15 minutes
-curl http://10.10.0.20:9428/select/logsql/query \
+curl http://db01.tail1a2b3c.ts.net:9428/select/logsql/query \
   -d 'query=host:web01 AND _time:15m'
 
 # errors from one stack
-curl http://10.10.0.20:9428/select/logsql/query \
+curl http://db01.tail1a2b3c.ts.net:9428/select/logsql/query \
   -d 'query=stack:gitea AND error AND _time:1h'
 
 # which streams exist at all
-curl http://10.10.0.20:9428/select/logsql/streams -d 'query=_time:1d'
+curl http://db01.tail1a2b3c.ts.net:9428/select/logsql/streams -d 'query=_time:1d'
 ```
 
-The built-in UI is at `/select/vmui`. Reach it over an SSH tunnel:
-
-```bash
-ssh -N -L 9428:10.10.0.20:9428 deploy@web01.example.com
-# then open http://localhost:9428/select/vmui
-```
+The built-in UI is at `/select/vmui`. On the tailnet, that is simply
+`http://db01.tail1a2b3c.ts.net:9428/select/vmui` from any device on the
+tailnet — no tunnel, and no public exposure either.
 
 ## VictoriaLogs has no authentication
 
@@ -130,24 +127,43 @@ the HTTP API. This repo defends that in three places, and all three are tested:
 
 - `VICTORIALOGS_BIND` defaults to `127.0.0.1`; a host that serves other hosts
   widens it to its **private** address, never `0.0.0.0`
-- the host's `network.firewall` scopes 9428 to the private network
+- the host's `network.firewall` scopes 9428 to the private network, and the
+  tailnet ACL restricts `tag:server:9428` to other hosts
 - `services/victoria-logs.yml` is `ingress: none`, so a domain cannot be bound
   to it by accident
 
 To publish the UI, put an authenticating layer in front — a Traefik basic-auth
 middleware, or Cloudflare Access on the route. Do not simply bind it wider.
 
-## One store per site
+## One store for the whole fleet
 
-`VICTORIALOGS_ENDPOINT` is set per host, so each host ships to the store nearest
-it. In the example fleet that is two stores: the Hetzner hosts use `db01`, the
-homelab hosts use `nas01`. A log pipeline that crosses a WAN link loses logs
-whenever the link does, and a collector that cannot reach its store fills its
-disk buffer and then starts dropping.
+`VICTORIALOGS_ENDPOINT` points every collector at `db01`, by its MagicDNS name:
 
-`tests/test_logging.py` checks that every endpoint points at a host this repo
-actually runs VictoriaLogs on, so a typo or a decommissioned store fails CI
-rather than quietly black-holing a host's logs.
+```yaml
+VICTORIALOGS_ENDPOINT: http://db01.tail1a2b3c.ts.net:9428
+```
+
+This used to be two stores. The Hetzner private network and the homelab LAN were
+never routed to each other, so `media01` and `nas01` had nowhere to ship to but
+a second VictoriaLogs on `nas01`. The tailnet made them one network and the
+second store stopped earning its keep — see [tailscale.md](tailscale.md).
+
+Two tests hold the line: every endpoint must resolve to a host this repo
+actually runs the store on, and all collectors must agree on one endpoint. A
+typo or a decommissioned store fails CI rather than quietly black-holing a
+host's logs.
+
+### Why the store binds every interface
+
+`db01` sets `VICTORIALOGS_BIND: 0.0.0.0`, which looks alarming for a service
+with no authentication. It is safe *on that host specifically*: `db01` has
+`ipv4_enabled: false`, so there is no public IPv4 to bind to — every interface
+means the Hetzner private network and the tailnet.
+
+That pairing is enforced, not assumed: a test fails if any host binds the store
+to `0.0.0.0` while having a public IPv4. On a host that does have one, use
+Tailscale Serve (`tailscale serve --bg --tcp 9428 tcp://127.0.0.1:9428`) and
+leave the bind on loopback instead.
 
 ## Adding journald
 

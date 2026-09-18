@@ -130,7 +130,32 @@ already has the token scoping for it.
 
 ---
 
-## 6. How logs get off a host
+## 6. How CI and operators reach a host
+
+**Chosen: a Tailscale mesh; every host joins, nothing listens on port 22.**
+
+Access policy stays in the Tailscale admin console rather than in this repo —
+one deliberate exception to the "everything is in the repo" rule, taken because
+a bad ACL applied by CI could lock CI out of the fleet it would need to fix it.
+[tailscale.md](tailscale.md) writes out the policy the repo expects so the two
+stay in step.
+
+| Option | Why you'd want it | Why not here |
+|---|---|---|
+| **Tailscale** *(chosen)* | Works through NAT with no port forwarding, gives CI a stable identity without a stable IP, and made the two log stores into one. Identity-based ACLs beat CIDR rules | A dependency on a coordination server, and a broken `tailscaled` means console recovery rather than an SSH fallback |
+| Public SSH, key-only | Nothing to run, nothing to depend on | Port 22 open to every scanner on the internet, no path to a NAT'd host, and CI's egress IP is not predictable enough to firewall |
+| WireGuard by hand | No third party, full control, excellent performance | You are now operating key distribution, NAT traversal and a hub host — all the parts Tailscale exists to do |
+| Headscale | Tailscale's protocol, your coordination server | Something else to run and keep available, and it is the thing that must be up for you to fix anything else |
+| Cloudflare Tunnel for SSH | Reuses the Cloudflare account already here | Good for exposing a service, awkward as the fleet's management plane; no host-to-host mesh, which is what removed the second log store |
+| A bastion host | Familiar, one public entry point | Still needs a public port, still cannot reach NAT'd homelab hosts, and it becomes a single point of failure with a long-lived key on it |
+
+**Switch if:** depending on a hosted coordination plane becomes unacceptable —
+Headscale speaks the same protocol, and only `tailscale/tailnet.yml` and the
+login server flag would change.
+
+---
+
+## 7. How logs get off a host
 
 **Chosen: Vector on every host, reading the Docker API, shipping to VictoriaLogs.**
 
@@ -154,7 +179,7 @@ collecting traces too and want one agent for everything (OpenTelemetry).
 
 ---
 
-## 7. Which CI
+## 8. Which CI
 
 **Given: Woodpecker.**
 

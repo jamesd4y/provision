@@ -20,6 +20,7 @@ REPO_ROOT = Path(os.environ.get("PROVISION_ROOT") or Path(__file__).resolve().pa
 HOSTS_DIR = REPO_ROOT / "hosts"
 SERVICES_DIR = REPO_ROOT / "services"
 CLOUDFLARE_DIR = REPO_ROOT / "cloudflare"
+TAILSCALE_DIR = REPO_ROOT / "tailscale"
 SCHEMA_DIR = REPO_ROOT / "schemas"
 
 
@@ -30,11 +31,12 @@ def set_root(root: Path) -> None:
     and check that validation rejects it. PROVISION_ROOT does the same thing
     from the command line, which is handy when reviewing someone else's branch.
     """
-    global REPO_ROOT, HOSTS_DIR, SERVICES_DIR, CLOUDFLARE_DIR
+    global REPO_ROOT, HOSTS_DIR, SERVICES_DIR, CLOUDFLARE_DIR, TAILSCALE_DIR
     REPO_ROOT = Path(root)
     HOSTS_DIR = REPO_ROOT / "hosts"
     SERVICES_DIR = REPO_ROOT / "services"
     CLOUDFLARE_DIR = REPO_ROOT / "cloudflare"
+    TAILSCALE_DIR = REPO_ROOT / "tailscale"
     # Schemas always come from the real checkout: a test fixture describes a
     # fleet, it does not get to redefine what a valid fleet is.
 
@@ -128,6 +130,9 @@ class Host:
     provider: Provider
     path: Path
     raw: dict
+    # Set from tailscale/tailnet.yml at load time so a host can work out its own
+    # MagicDNS name without every caller having to pass the tailnet around.
+    magic_dns_suffix: str | None = None
 
     @property
     def enabled(self) -> bool:
@@ -178,8 +183,33 @@ class Host:
         return [d for d in (self.hardware.get("storage") or []) if d is not self.root_disk]
 
     @property
+    def tailscale(self) -> dict:
+        return self.raw.get("tailscale", {}) or {}
+
+    @property
+    def on_tailnet(self) -> bool:
+        return bool(self.tailscale.get("enabled", False))
+
+    @property
+    def tailscale_hostname(self) -> str:
+        return self.tailscale.get("hostname") or self.name
+
+    @property
+    def public_ssh(self) -> bool:
+        """Whether port 22 is open to the world. Off unless a host asks for it."""
+        return bool(self.network.get("public_ssh", False))
+
+    @property
     def ansible_host(self) -> str | None:
-        """Where SSH connects. Private IP wins so CI can ride a VPN/private net."""
+        """Where SSH connects.
+
+        A host on the tailnet is reached by its MagicDNS name: that address works
+        from anywhere the tailnet reaches, including a CI runner with no fixed
+        egress IP and a host behind NAT. Everything else falls back to the
+        addresses the host declares.
+        """
+        if self.on_tailnet and self.magic_dns_suffix:
+            return f"{self.tailscale_hostname}.{self.magic_dns_suffix}"
         net = self.network
         return net.get("private_ipv4") or net.get("ipv4") or net.get("ipv6") or self.raw.get("fqdn")
 
@@ -253,6 +283,7 @@ class Repo:
     hosts: dict[str, Host] = field(default_factory=dict)
     services: dict[str, Service] = field(default_factory=dict)
     zones: dict = field(default_factory=dict)
+    tailnet: dict = field(default_factory=dict)
 
     def hosts_for_provider(self, provider: str) -> list[Host]:
         return [h for h in self.hosts.values() if h.provider.name == provider and h.enabled]
@@ -345,7 +376,11 @@ def load_providers() -> dict[str, Provider]:
     return providers
 
 
-def load_hosts(providers: dict[str, Provider], zone_names: set[str] | None = None) -> dict[str, Host]:
+def load_hosts(
+    providers: dict[str, Provider],
+    zone_names: set[str] | None = None,
+    magic_dns_suffix: str | None = None,
+) -> dict[str, Host]:
     hosts: dict[str, Host] = {}
     for provider in providers.values():
         for path in sorted(provider.path.glob("*.yml")):
@@ -372,7 +407,13 @@ def load_hosts(providers: dict[str, Provider], zone_names: set[str] | None = Non
                     f"{_rel(path)}: hostname '{stem}' already defined in "
                     f"{_rel(hosts[stem].path)} — hostnames are global"
                 )
-            hosts[stem] = Host(name=stem, provider=provider, path=path, raw=merged)
+            hosts[stem] = Host(
+                name=stem,
+                provider=provider,
+                path=path,
+                raw=merged,
+                magic_dns_suffix=magic_dns_suffix,
+            )
     return hosts
 
 
@@ -393,17 +434,27 @@ def load_zones() -> dict:
     return read_yaml(path)
 
 
+def load_tailnet() -> dict:
+    path = TAILSCALE_DIR / "tailnet.yml"
+    if not path.is_file():
+        return {}
+    config = read_yaml(path)
+    return config if config.get("enabled", True) else {}
+
+
 def load_repo() -> Repo:
     # Zones load first: a domain's zone is inferred from the managed zone list,
     # not from counting dots.
     zones = load_zones()
     zone_names = set((zones.get("zones") or {}).keys())
+    tailnet = load_tailnet()
     providers = load_providers()
     return Repo(
         providers=providers,
-        hosts=load_hosts(providers, zone_names),
+        hosts=load_hosts(providers, zone_names, tailnet.get("magic_dns_suffix")),
         services=load_services(),
         zones=zones,
+        tailnet=tailnet,
     )
 
 

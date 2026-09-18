@@ -47,6 +47,7 @@ steps:
     environment: *bws_env
     commands:
       - scripts/refresh_host_ips.sh
+      - eval "$(scripts/tailscale_up.sh)"
       - eval "$(scripts/ssh_setup.sh)"
       - cd ansible
       # --check --diff reports what would change without changing it.

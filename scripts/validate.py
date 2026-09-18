@@ -62,6 +62,7 @@ def schema_pass(report: Report, registry: Registry) -> None:
     host_v = validator_for("host.schema.json", registry)
     service_v = validator_for("service.schema.json", registry)
     zones_v = validator_for("zones.schema.json", registry)
+    tailnet_v = validator_for("tailnet.schema.json", registry)
 
     for entry in sorted(model.HOSTS_DIR.iterdir()):
         if not entry.is_dir() or entry.name.startswith("."):
@@ -83,6 +84,10 @@ def schema_pass(report: Report, registry: Registry) -> None:
     if zones_path.is_file():
         _check(report, zones_v, zones_path, model.read_yaml(zones_path))
 
+    tailnet_path = model.TAILSCALE_DIR / "tailnet.yml"
+    if tailnet_path.is_file():
+        _check(report, tailnet_v, tailnet_path, model.read_yaml(tailnet_path))
+
 
 def _check(report: Report, validator: Draft202012Validator, path: Path, data: dict) -> None:
     rel = str(path.relative_to(model.REPO_ROOT))
@@ -93,10 +98,42 @@ def _check(report: Report, validator: Draft202012Validator, path: Path, data: di
 
 def cross_reference_pass(report: Report, repo: Repo) -> None:
     zone_names = set((repo.zones.get("zones") or {}).keys())
+    tailnet_configured = bool(repo.tailnet)
+    known_tags = set((repo.tailnet.get("tags") or {}).values())
 
     for host in repo.hosts.values():
         rel = str(host.path.relative_to(model.REPO_ROOT))
         provider = host.provider
+
+        # The one mistake that cannot be fixed remotely: a host with no way in.
+        if not host.on_tailnet and not host.public_ssh:
+            report.error(
+                rel,
+                "no way in: not on the tailnet and network.public_ssh is false. "
+                "Set tailscale.enabled or network.public_ssh, or nothing will be "
+                "able to reach this host once the firewall role runs",
+            )
+
+        if host.on_tailnet and not tailnet_configured:
+            report.error(
+                rel,
+                "tailscale.enabled is true but tailscale/tailnet.yml is missing or disabled",
+            )
+
+        for tag in host.tailscale.get("tags") or []:
+            if known_tags and tag not in known_tags:
+                report.warn(
+                    rel,
+                    f"tailscale tag '{tag}' is not one of the tags in tailscale/tailnet.yml "
+                    f"({', '.join(sorted(known_tags))}); the OAuth client must own it",
+                )
+
+        if host.public_ssh:
+            report.warn(
+                rel,
+                "network.public_ssh is true — port 22 is open to the world. "
+                "Fine during recovery, worth removing afterwards",
+            )
 
         if provider.kind == "baremetal" and not host.network.get("ipv4") and not host.raw.get("fqdn"):
             report.error(rel, "baremetal hosts need network.ipv4 or fqdn — nothing can create them")
@@ -184,6 +221,22 @@ def cross_reference_pass(report: Report, repo: Repo) -> None:
                 rel,
                 f"x-provision.router_service '{service.router_service}' is not a compose service",
             )
+
+    if tailnet_configured:
+        suffix = repo.tailnet.get("magic_dns_suffix", "")
+        on_tailnet = [h for h in repo.hosts.values() if h.enabled and h.on_tailnet]
+        names: dict[str, str] = {}
+        for host in on_tailnet:
+            name = host.tailscale_hostname
+            if name in names:
+                report.error(
+                    "tailscale/tailnet.yml",
+                    f"tailnet name '{name}' is claimed by both {names[name]} and {host.name}; "
+                    "MagicDNS names must be unique",
+                )
+            names[name] = host.name
+        if on_tailnet and not suffix:
+            report.error("tailscale/tailnet.yml", "magic_dns_suffix is required once hosts join the tailnet")
 
     all_domains: dict[str, str] = {}
     for host in repo.hosts.values():

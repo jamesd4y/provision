@@ -53,3 +53,19 @@ write_files:
 runcmd:
   - [systemctl, enable, --now, qemu-guest-agent]
   - [systemctl, restart, ssh]
+%{ if tailscale_auth_key != "" ~}
+  # Join the tailnet at first boot. This matters more than it looks: hosts have
+  # no public SSH rule, so if a machine does not register here, nothing can
+  # reach it afterwards to fix it. The Ansible role is idempotent and re-runs
+  # this safely, but it needs a way in first.
+  #
+  # The key in this file is short-lived, single-tag and pre-authorised. It stays
+  # readable in /var/lib/cloud until it expires, which is why it is minted per
+  # apply rather than being the OAuth client secret itself.
+  - [sh, -c, "curl -fsSL https://pkgs.tailscale.com/stable/debian/$(. /etc/os-release && echo $VERSION_CODENAME).noarmor.gpg -o /usr/share/keyrings/tailscale-archive-keyring.gpg"]
+  - [sh, -c, "echo \"deb [signed-by=/usr/share/keyrings/tailscale-archive-keyring.gpg] https://pkgs.tailscale.com/stable/debian $(. /etc/os-release && echo $VERSION_CODENAME) main\" > /etc/apt/sources.list.d/tailscale.list"]
+  - [apt-get, update]
+  - [apt-get, install, -y, --no-install-recommends, tailscale]
+  - [systemctl, enable, --now, tailscaled]
+  - [tailscale, up, "--auth-key=${tailscale_auth_key}?ephemeral=false&preauthorized=true", "--hostname=${tailscale_hostname}", "--advertise-tags=${tailscale_tags}", "--accept-dns=true"]
+%{ endif ~}
